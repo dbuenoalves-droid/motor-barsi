@@ -290,6 +290,7 @@ footer .panel{font-size:12.5px}footer ul{margin:6px 0 0;padding-left:18px}footer
 .top-in,main,footer,.ctx-in{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .quad,.grid{grid-template-columns:1fr}.mgrid{grid-template-columns:repeat(2,1fr)}}
 @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+nav,.ctx-in{scrollbar-width:none}nav::-webkit-scrollbar,.ctx-in::-webkit-scrollbar{display:none}
 """
 DARK = ("--bg:#0e1115;--panel:#171b21;--panel2:#1f242b;--tx:#e6e9ee;--mut:#98a1ad;--ln:#2a313a;--top:#0a0d11;"
         "--top2:#141920;--pos:#4ade80;--neg:#f87171;--warn:#fbbf24;--deb:#fb923c;--jur:#60a5fa;--div:#4ade80;"
