@@ -1,0 +1,48 @@
+# Roda o Motor Barsi todo dia útil depois do fechamento da B3 e publica o painel no GitHub Pages.
+name: Atualizar painel
+
+on:
+  schedule:
+    - cron: "0 23 * * 1-5"   # 23:00 UTC = 19:00 em Cuiabá, segunda a sexta
+  workflow_dispatch:          # botão "Run workflow" para atualizar na hora
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  gerar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Rodar a varredura
+        env:
+          TZ: America/Cuiaba
+        run: python analisar.py
+      - name: Montar o site
+        run: |
+          mkdir -p _site
+          cp relatorios/ultimo_relatorio.html _site/index.html
+          cp relatorios/*/dados.csv _site/dados.csv
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  publicar:
+    needs: gerar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

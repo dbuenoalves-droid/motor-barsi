@@ -1,0 +1,90 @@
+# =============================================================================
+#  Motor de Oportunidades — Barsi + Axiomas de Zurique + Kiyosaki
+#  Edite os valores para ajustar as regras. Percentuais em decimal (0.06 = 6%).
+# =============================================================================
+
+[geral]
+anos_media_proventos = 3      # média de proventos usada no preço teto (Barsi)
+workers = 4                   # downloads simultâneos de histórico
+pasta_relatorios = "relatorios"
+pasta_cache = "cache"         # dados brutos do dia (rodar de novo no mesmo dia é instantâneo)
+
+# -----------------------------------------------------------------------------
+[acoes]
+# Setores do Fundamentus (resultado.php?setor=N). Padrão: BESST.
+# Para incluir outro setor perene, acrescente a linha, ex.:  "21" = "Papel e Celulose"
+setores = { "20" = "Bancos", "14" = "Energia Elétrica", "2" = "Saneamento", "31" = "Seguros", "40" = "Telecomunicações" }
+setores_financeiros = ["20", "31"]   # nesses, a dívida líquida/PL não se aplica
+
+yield_minimo = 0.06                  # Barsi: preço teto = DPA / 6%
+liquidez_minima = 2_000_000          # volume médio diário em R$
+dy_pre_filtro = 0.04                 # DY mínimo (Fundamentus) para valer baixar o histórico
+roe_minimo = 0.08
+divida_liq_pl_maxima = 2.5
+anos_minimos_com_proventos = 4       # dos últimos 5 anos
+payout_maximo = 1.0                  # paga mais de 100% do lucro = dividendo insustentável
+
+# -----------------------------------------------------------------------------
+[fiis]
+# Segmentos do Fundamentus aceitos. Fora daqui: Shoppings, Escritórios, Lajes,
+# Hospital, Hotel, Residencial (ciclos/vacância voláteis).
+segmentos_permitidos = ["Logística", "Títulos e Val. Mob.", "Multicategoria", "Híbrido", "Varejo", "Outros"]
+segmentos_genericos  = ["Multicategoria", "Híbrido", "Outros"]   # gera alerta: confira o portfólio
+# O Fundamentus classifica mal muitos fundos ("Multicategoria"). Se o NOME tiver
+# uma destas palavras, o fundo é descartado (escritórios, shoppings, hotéis...).
+palavras_excluidas = ["OFFICE", "CORPORATE", "LAJE", "ESCRITÓRIO", "ESCRITORIO", "SHOPPING", "MALL",
+                      "HOTEL", "HOSPITAL", "RESIDENCIAL", "EDUCACIONAL", "AGÊNCIA", "AGENCIAS"]
+
+yield_minimo_tijolo = 0.08           # teto = rendimento anual / 8%
+yield_minimo_papel  = 0.10           # papel não tem imóvel físico: exige mais renda
+liquidez_minima = 1_000_000          # volume médio diário em R$
+dy_pre_filtro = 0.06
+pvp_maximo = 1.05                    # acima disso = vitrine (pagando caro pelo patrimônio)
+pvp_minimo_papel = 0.70              # papel abaixo disso = mercado precificando calote
+vacancia_maxima = 0.15
+meses_minimos_com_rendimento = 10    # dos últimos 12
+anos_minimos_historico = 2
+
+# -----------------------------------------------------------------------------
+[sinais]
+# O que caracteriza "bom ativo descontado pela debandada do mercado".
+# OPORTUNIDADE exige TODOS: abaixo do teto + queda relativa + DY expandido
+# (+ P/VP descontado, no caso de FII) e nenhum alerta grave.
+# Quem só caiu junto com o mercado vai para OBSERVAR.
+indice_fiis  = "XFIX11"       # ETF do IFIX: régua para FIIs
+indice_acoes = "BOVA11"       # ETF do Ibovespa: régua para ações
+queda_relativa_minima = 0.10  # caiu 10+ p.p. a mais que o índice em 52 semanas (debandada específica)
+queda_52s_minima   = 0.15     # usado só se o índice não estiver disponível
+expansao_dy_minima = 0.15     # DY atual 15%+ acima do DY médio histórico
+pvp_desconto       = 0.90     # FII a 0,90x o VP ou menos
+margem_minima      = 0.00     # preço precisa estar abaixo do teto
+
+# Ruído x estrutural: se os proventos caíram JUNTO com a cota, não é debandada,
+# é o mercado precificando um problema real (3º Axioma: corte, não reze).
+tendencia_proventos_minima = 0.80   # proventos 12m >= 80% da média de N anos
+
+dy_vs_ffo_alerta = 1.5        # tijolo distribuindo 1,5x o FFO: renda pode vir de venda de imóveis
+dy_suspeito      = 0.25       # DY > 25% = reprovado (insustentável / extraordinário)
+
+# -----------------------------------------------------------------------------
+[sugestoes]
+# Listas de sugestões. TODAS partem só dos ativos limpos: sem descarte, sem renda
+# caindo (estrutural), sem alerta grave e abaixo do preço teto.
+top = 10                                  # quantos ativos por lista
+
+# Queda de juros: quem mais se valoriza quando a Selic cai.
+# FIIs de papel CDI perdem renda com juros caindo, por isso ficam de fora.
+setores_sensiveis_juros = ["Energia Elétrica", "Saneamento", "Telecomunicações"]
+juros_pvp_maximo = 0.95                   # tijolo/FoF com desconto patrimonial para fechar
+
+# Dividendos: maior renda HOJE, desde que estável e recorrente
+div_dy_minimo_acao = 0.08
+div_dy_minimo_fii = 0.11
+div_pvp_minimo_papel = 0.85               # papel muito descontado = crédito questionado
+div_tendencia_minima = 0.95               # proventos 12m >= 95% da média
+
+# Longo prazo: acumular por anos (Barsi/Kiyosaki)
+longo_roe_minimo = 0.12
+longo_cresc_proventos_minimo = 0.0        # proventos não podem ter encolhido em 3 anos
+longo_pvp_maximo_fii = 1.0
+longo_vacancia_maxima = 0.10
