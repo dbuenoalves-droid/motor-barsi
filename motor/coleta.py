@@ -131,12 +131,38 @@ def acoes(cache: Cache, setor: str | None = None) -> list[dict]:
     return _tabela(_obter(cache, f"fund_setor_{setor}.html", url, "latin-1"))
 
 
+def _pagina_detalhes(cache: Cache, ticker: str) -> str:
+    url = f"{FUNDAMENTUS}/detalhes.php?papel={ticker}"
+    return _obter(cache, f"fund_det_{ticker}.html", url, "latin-1")
+
+
 def setor_da_acao(cache: Cache, ticker: str) -> tuple[str, str] | None:
     """Retorna (id_setor, nome_setor) a partir da página de detalhes."""
-    url = f"{FUNDAMENTUS}/detalhes.php?papel={ticker}"
-    texto = _obter(cache, f"fund_det_{ticker}.html", url, "latin-1")
+    texto = _pagina_detalhes(cache, ticker)
     m = re.search(r"resultado\.php\?setor=(\d+)[^>]*>([^<]+)<", texto)
     return (m.group(1), m.group(2).strip()) if m else None
+
+
+_PAR = re.compile(r'<td class="label[^"]*">(.*?)</td>\s*<td class="data[^"]*">(.*?)</td>', re.S)
+
+
+def detalhes(cache: Cache, ticker: str) -> dict[str, str]:
+    """Pares rótulo -> valor (texto) da página de detalhes do Fundamentus.
+
+    Ex.: FII -> 'Ativos', 'Patrim Líquido', 'FFO/Cota'; ação -> 'Dív. Líquida',
+    'Valor da firma', 'EV / EBITDA'. Rótulos repetidos (12m x 3m) ficam com o primeiro.
+    """
+    texto = _pagina_detalhes(cache, ticker)
+    saida: dict[str, str] = {}
+    for rot, val in _PAR.findall(texto):
+        nomes = re.findall(r'<span[^>]*class="txt"[^>]*>(.*?)</span>', rot, re.S)
+        if not nomes:
+            continue
+        chave = " ".join(re.sub(r"<[^>]+>", "", nomes[-1]).split())
+        valor = " ".join(re.sub(r"<[^>]+>", "", val).split())
+        if chave and valor:
+            saida.setdefault(chave, valor)
+    return saida
 
 
 # --------------------------------------------------------------------------- Yahoo
@@ -198,10 +224,20 @@ def focus_selic(cache: Cache) -> list[tuple[str, float]]:
 
 
 def indicador_bcb(cache: Cache, serie: int) -> tuple[float, str] | None:
-    """Último valor de uma série SGS (432 = meta Selic, 13522 = IPCA 12m)."""
-    url = f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{serie}/dados/ultimos/1?formato=json"
-    try:
-        dado = json.loads(_obter(cache, f"bcb_{serie}.json", url))[-1]
-        return float(dado["valor"]) / 100, dado["data"]
-    except Exception:
-        return None
+    """Último valor de uma série SGS (432 = meta Selic, 13522 = IPCA 12m).
+
+    Consulta por intervalo de datas (6 meses); o atalho 'ultimos/1' da API do BC às vezes
+    responde 304 sem dados e fica só como alternativa.
+    """
+    hoje = dt.date.today()
+    ini = hoje - dt.timedelta(days=180)
+    urls = [f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{serie}/dados?formato=json"
+            f"&dataInicial={ini:%d/%m/%Y}&dataFinal={hoje:%d/%m/%Y}",
+            f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{serie}/dados/ultimos/1?formato=json"]
+    for k, url in enumerate(urls):
+        try:
+            dado = json.loads(_obter(cache, f"bcb_{serie}_{k}.json", url))[-1]
+            return float(dado["valor"]) / 100, dado["data"]
+        except Exception:
+            continue
+    return None

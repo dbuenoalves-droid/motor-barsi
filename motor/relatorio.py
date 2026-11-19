@@ -9,7 +9,7 @@ from .analise import DESCARTADO, ESTRUTURAL, ORDEM_STATUS, Resultado
 from .formato import brl, dec, pct
 from .sugestoes import CATEGORIAS, Sugestao, limpo, listas_por_ticker
 
-COR = {"debandada": "deb", "juros": "jur", "dividendos": "div", "longo": "lon"}
+COR = {"compra": "cmp", "debandada": "deb", "juros": "jur", "dividendos": "div", "longo": "lon"}
 
 
 def _e(v) -> str:
@@ -59,6 +59,13 @@ def _card(s: Sugestao, rank: int, cat: str, mapa: dict) -> str:
     ])
     motivos = "".join(f"<li>{_e(m)}</li>" for m in s.motivos)
     alertas = "".join(f'<div class="alerta">{_e(a)}</div>' for a in r.alertas)
+    if s.partes:
+        barras = "".join(
+            f'<div class="pt"><span>{_e(k)}</span><i><u style="--w:{max(0, v) / mx * 100:.0f}%"></u></i>'
+            f'<b>{dec(v, 0)}/{mx}</b></div>' if mx else
+            f'<div class="pt"><span>{_e(k)}</span><i></i><b class="neg">{dec(v, 0)}</b></div>'
+            for k, (v, mx) in s.partes.items())
+        motivos = f'</ul><div class="partes">{barras}</div><ul class="why">' + motivos
     return f"""<article class="card">
   <div class="card-h">
     <span class="rank c-{COR[cat]}">{rank}</span>
@@ -111,7 +118,36 @@ def _pagina_categoria(cat: str, sug: list[Sugestao], contexto: dict, mapa: dict)
     return f'<section class="page" id="p-{cat}" hidden>{_cabecalho_categoria(cat, contexto, len(sug))}{corpo}</section>'
 
 
-def _visao_geral(sug: dict, mapa: dict, kpis: str) -> str:
+def _composicao(itens: list[Sugestao]) -> str:
+    grupos: dict[str, int] = {}
+    for s in itens:
+        g = s.r.classe if s.r.classe == "Ação" else f"FII {s.r.tipo.lower()}"
+        grupos[g] = grupos.get(g, 0) + 1
+    return " · ".join(f"{n} {g}" for g, n in sorted(grupos.items(), key=lambda x: -x[1]))
+
+
+def _pagina_compra(compra: list[Sugestao], fora: list[Sugestao], contexto: dict, mapa: dict,
+                   max_grupo: int) -> str:
+    if compra:
+        cards = "".join(_card(s, i, "compra", mapa) for i, s in enumerate(compra, 1))
+        corpo = f'<div class="grid">{cards}</div>'
+    else:
+        corpo = '<div class="vazio">Nenhum ativo passa hoje em todos os filtros do ranking de compra.</div>'
+    nota_fora = ""
+    if fora:
+        nomes = ", ".join(f"{s.r.ticker} ({dec(s.nota, 0)})" for s in fora[:12])
+        nota_fora = (f'<div class="panel mut">Fora pelo limite de {max_grupo} por setor/segmento '
+                     f'(para não concentrar a carteira): {_e(nomes)}</div>')
+    info = (f'<div class="panel"><b>Composição:</b> {_e(_composicao(compra))}. '
+            '<span class="mut">Nota = Renda recorrente (35) + Estabilidade dos proventos (30) + '
+            'Qualidade e gestão (20) + Preço de entrada (15) − alertas. "Gestão" é medida por números '
+            '(ROE, payout, dívida, vacância, alavancagem, confiança no crédito) — o motor não avalia o gestor '
+            'em si: leia o relatório gerencial antes de comprar.</span></div>')
+    return (f'<section class="page" id="p-compra" hidden>{_cabecalho_categoria("compra", contexto, len(compra))}'
+            f'{info}{corpo}{nota_fora}</section>')
+
+
+def _visao_geral(sug: dict, mapa: dict, kpis: str, compra: list[Sugestao] | None = None) -> str:
     consenso = sorted(((t, c) for t, c in mapa.items() if len(c) >= 2), key=lambda x: -len(x[1]))
     chips = "".join(
         f'<div class="cons"><b>{_e(t)}</b><span>{" · ".join(_e(CATEGORIAS[x][0]) for x in c)}</span></div>'
@@ -127,8 +163,18 @@ def _visao_geral(sug: dict, mapa: dict, kpis: str) -> str:
         paineis.append(f"""<div class="panel b-{COR[cat]}">
   <div class="panel-h"><div><div class="eyebrow">{_e(sub)}</div><h3>{_e(titulo)}</h3></div>
   <a class="ver" href="#{cat}">Ver lista ({len(itens)}) →</a></div>{linhas}</div>""")
+    destaque = ""
+    if compra:
+        linhas = "".join(
+            f'<a class="mini" href="#compra"><span class="rank sm c-cmp">{i}</span>'
+            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · {_e(s.r.tipo)} · DY {pct(s.r.dy12)} · '
+            f'margem {pct(s.r.margem, 0, True)}</span><em>{dec(s.nota, 0)}</em></a>'
+            for i, s in enumerate(compra[:10], 1))
+        destaque = f"""<div class="panel b-cmp topo">
+  <div class="panel-h"><div><div class="eyebrow">Só compra · foco em dividendos</div><h3>Ranking de compra — top 10</h3></div>
+  <a class="ver" href="#compra">Ver ranking ({len(compra)}) →</a></div><div class="duas">{linhas}</div></div>"""
     return f"""<section class="page" id="p-visao">
-<div class="kpis">{kpis}</div>
+<div class="kpis">{kpis}</div>{destaque}
 <div class="panel"><div class="panel-h"><div><div class="eyebrow">Consenso</div>
 <h3>Aparecem em mais de uma lista</h3></div></div><div class="conswrap">{chips}</div></div>
 <div class="quad">{''.join(paineis)}</div></section>"""
@@ -185,7 +231,12 @@ def _descartes(resultados: list[Resultado]) -> str:
             rot, cls = "Alerta grave", "warn"
         else:
             rot, cls = "Acima do teto", "mut"
-        motivos = r.descarte + r.alertas_graves or [f"Preço {brl(r.preco)} acima do teto {brl(r.teto)}"]
+        motivos = r.descarte + r.alertas_graves
+        if r.status != DESCARTADO and r.margem is not None and r.margem < 0:
+            bruto = f" (pelos proventos pagos seria {brl(r.teto_bruto)})" if r.teto_bruto else ""
+            motivos = motivos + [f"Preço {brl(r.preco)} acima do teto {brl(r.teto)}{bruto}"]
+        if not motivos:
+            motivos = [f"Preço {brl(r.preco)} acima do teto {brl(r.teto)}"]
         linhas.append(
             f"<tr><td><b>{_e(r.ticker)}</b><div class='sub'>{_e(r.nome.title()[:34])}</div></td>"
             f"<td>{_e(r.classe)}</td><td><span class='pill {cls}'>{rot}</span></td>"
@@ -203,7 +254,7 @@ crédito questionado, segmento fora do escopo ou preço acima do teto. Nenhum de
 CSS = """
 :root{--bg:#e6e8ec;--panel:#fff;--panel2:#f3f4f6;--tx:#14181d;--mut:#616975;--ln:#d8dce2;
 --top:#18212c;--top2:#222d3a;--toptx:#e8edf3;--topmut:#93a0b1;--pos:#15803d;--neg:#b91c1c;--warn:#b45309;
---deb:#c2410c;--jur:#1d4ed8;--div:#15803d;--lon:#7c3aed;--neu:#475569;--sh:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08)}
+--deb:#c2410c;--jur:#1d4ed8;--div:#15803d;--lon:#7c3aed;--cmp:#0f766e;--neu:#475569;--sh:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.08)}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){%DARK%}}
 :root[data-theme="dark"]{%DARK%}
 *{box-sizing:border-box}html{scroll-behavior:smooth}
@@ -247,6 +298,14 @@ main{max-width:1440px;margin:0 auto;padding-block:22px 40px}
 .rank{display:grid;place-items:center;width:30px;height:30px;border-radius:8px;color:#fff;font-weight:700;font-size:14px;flex:none}
 .rank.sm{width:24px;height:24px;font-size:12px;border-radius:6px}
 .c-deb{background:var(--deb)}.c-jur{background:var(--jur)}.c-div{background:var(--div)}.c-lon{background:var(--lon)}
+.c-cmp{background:var(--cmp)}.h-cmp{border-left-color:var(--cmp)}.b-cmp{border-top:3px solid var(--cmp)!important}.t-cmp{color:var(--cmp)}
+.duas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:24px}
+@media (max-width:1000px){.duas{grid-template-columns:1fr}}
+.partes{display:grid;gap:4px;padding:8px 10px;background:var(--panel2);border:1px solid var(--ln);border-radius:9px}
+.pt{display:grid;grid-template-columns:88px 1fr 48px;gap:8px;align-items:center;font-size:12px}
+.pt span{color:var(--mut)}.pt b{text-align:right;font-variant-numeric:tabular-nums}
+.pt i{display:block;height:6px;background:var(--ln);border-radius:3px;overflow:hidden}
+.pt u{display:block;height:100%;width:var(--w);background:var(--cmp);text-decoration:none}
 .hero{display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between;align-items:center;background:var(--panel);
 border:1px solid var(--ln);border-left:5px solid var(--neu);border-radius:12px;padding:18px 22px;margin-bottom:16px;box-shadow:var(--sh)}
 .hero h2{margin:2px 0 4px;font-size:22px}.hero p{margin:0;color:var(--mut);max-width:820px}
@@ -294,7 +353,7 @@ nav,.ctx-in{scrollbar-width:none}nav::-webkit-scrollbar,.ctx-in::-webkit-scrollb
 """
 DARK = ("--bg:#0e1115;--panel:#171b21;--panel2:#1f242b;--tx:#e6e9ee;--mut:#98a1ad;--ln:#2a313a;--top:#0a0d11;"
         "--top2:#141920;--pos:#4ade80;--neg:#f87171;--warn:#fbbf24;--deb:#fb923c;--jur:#60a5fa;--div:#4ade80;"
-        "--lon:#a78bfa;--neu:#94a3b8;--sh:none;color-scheme:dark")
+        "--lon:#a78bfa;--cmp:#2dd4bf;--neu:#94a3b8;--sh:none;color-scheme:dark")
 CSS = CSS.replace("%DARK%", DARK)
 FONTES = ('<link rel="preconnect" href="https://fonts.googleapis.com">'
           '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">')
@@ -338,8 +397,10 @@ def _faixa_contexto(contexto: dict) -> str:
 
 
 def gerar_html(resultados: list[Resultado], sug: dict[str, list[Sugestao]], contexto: dict,
-               caminho: Path, web_caminho: Path | None = None) -> None:
+               caminho: Path, web_caminho: Path | None = None,
+               compra: tuple[list[Sugestao], list[Sugestao]] | None = None, max_grupo: int = 0) -> None:
     mapa = listas_por_ticker(sug)
+    ranking, fora = compra or ([], [])
     aprovados = [r for r in resultados if limpo(r)]
     kpis_dados = [
         ("Ativos analisados", len(resultados), f"+{contexto.get('prefiltrados', 0)} fora no pré-filtro"
@@ -351,10 +412,12 @@ def gerar_html(resultados: list[Resultado], sug: dict[str, list[Sugestao]], cont
     kpis = "".join(f'<div class="kpi"><span>{_e(k)}</span><b>{v}</b><small>{_e(d)}</small></div>'
                    for k, v, d in kpis_dados)
 
-    nav = [("visao", "Visão geral")] + [(c, CATEGORIAS[c][0]) for c in sug] + \
-          [("radar", "Radar completo"), ("furadas", "Furadas")]
+    nav = ([("visao", "Visão geral")] + ([("compra", "Ranking de compra")] if compra else [])
+           + [(c, CATEGORIAS[c][0]) for c in sug] + [("radar", "Radar completo"), ("furadas", "Furadas")])
     nav_html = "".join(f'<a href="#{k}">{_e(n)}</a>' for k, n in nav)
-    paginas = [_visao_geral(sug, mapa, kpis)]
+    paginas = [_visao_geral(sug, mapa, kpis, ranking)]
+    if compra:
+        paginas.append(_pagina_compra(ranking, fora, contexto, mapa, max_grupo))
     paginas += [_pagina_categoria(c, itens, contexto, mapa) for c, itens in sug.items()]
     paginas += [_radar(resultados, mapa), _descartes(resultados)]
 
@@ -365,8 +428,11 @@ def gerar_html(resultados: list[Resultado], sug: dict[str, list[Sugestao]], cont
 </div><div class="ctx"><div class="ctx-in">{_faixa_contexto(contexto)}</div></div></header>
 <main>{''.join(paginas)}</main>
 <footer><div class="panel"><b>Como o motor decide</b><ul>
-<li><b>Limpo</b> = setor perene, liquidez, lucro, histórico completo de proventos, renda de 12m ≥ 80% da média de 3 anos, sem alerta grave (payout &gt; 100%, DY &gt; 25%, vacância alta, crédito questionado, corte recente) e preço abaixo do teto.</li>
-<li><b>Teto Barsi</b> = menor entre proventos de 12m e média de 3 anos ÷ yield mínimo (ações 6%, FII tijolo 8%, papel 10%).</li>
+<li><b>Limpo</b> = setor perene, liquidez, lucro, histórico completo de proventos, renda de 12m ≥ 80% da média de 3 anos, sem alerta grave (payout &gt; 100%, DY &gt; 25%, vacância alta, alavancagem alta, crédito questionado, corte recente) e preço abaixo do teto.</li>
+<li><b>Teto Barsi</b> = menor entre proventos de 12m e média de 3 anos ÷ yield mínimo (ações 6%, FII tijolo 8%, híbrido 9%, papel 10%). Fundos de fundos (FoF) ficam fora. No tijolo e no híbrido, limitado ao FFO/cota: renda de venda de imóvel não estica o teto.</li>
+<li><b>Balanço</b>: FII com passivo acima de 20% do PL e empresa com dívida líquida acima de 3x o EBITDA perdem nota; acima de 50% / 4x, saem das listas.</li>
+<li><b>Tipo do FII</b> pela fração do PL em imóveis físicos: abaixo de 10% = Papel, de 10% a 50% = Híbrido, acima = Tijolo (correções manuais em <code>config.toml</code>).</li>
+<li><b>FII de papel e híbrido</b> na lista de Dividendos são ordenados pelo DY real (descontado o IPCA da parte em crédito), porque a correção monetária distribuída repõe o principal.</li>
 <li><b>Nota</b> 0–100 é específica de cada lista; serve para ordenar, não para comparar listas entre si.</li>
 <li>O motor não lê notícias nem relatórios gerenciais: use os links de cada card para confirmar o motivo da queda antes de decidir.</li>
 <li>Fontes: Fundamentus, Yahoo Finance, Banco Central (Selic, IPCA, Focus). Regras ajustáveis em <code>config.toml</code>.</li>
@@ -386,16 +452,23 @@ def gerar_html(resultados: list[Resultado], sug: dict[str, list[Sugestao]], cont
 CAMPOS_CSV = [
     ("Status", "status"), ("Classe", "classe"), ("Ticker", "ticker"), ("Nome", "nome"),
     ("Segmento", "segmento"), ("Tipo", "tipo"), ("Preço", "preco"), ("Teto", "teto"),
+    ("Teto bruto (sem limite FFO)", "teto_bruto"),
     ("Margem", "margem"), ("DPA 12m", "dpa12"), ("DPA média", "dpa_media"), ("DY 12m", "dy12"),
     ("DY médio", "dy_medio"), ("Expansão DY", "expansao_dy"), ("Queda 52s", "queda52"),
     ("Queda vs índice", "queda_rel"), ("P/VP", "pvp"), ("Renda vs média", "tendencia"),
     ("Cresc. proventos 3a", "cresc_dpa"), ("Liquidez", "liquidez"), ("Renda/mês R$1k", "renda_mil"),
     ("Score", "score"),
 ]
+EXTRAS_CSV = [("Imóveis/PL", "imoveis_pl"), ("Origem do tipo", "tipo_origem"),
+              ("FFO/cota", "ffo_cota"), ("Cobertura FFO (papel)", "ffo_cobertura"),
+              ("Alavancagem FII", "alavancagem"),
+              ("Dív.Líq/EBITDA", "divida_ebitda"), ("DY real (papel)", "dy_real")]
 
 
-def gerar_csv(resultados: list[Resultado], sug: dict[str, list[Sugestao]], caminho: Path) -> None:
+def gerar_csv(resultados: list[Resultado], sug: dict[str, list[Sugestao]], caminho: Path,
+              compra: list[Sugestao] | None = None) -> None:
     mapa = listas_por_ticker(sug)
+    pos = {s.r.ticker: (i, s.nota) for i, s in enumerate(compra or [], 1)}
 
     def br(v):
         if isinstance(v, float):
@@ -404,16 +477,29 @@ def gerar_csv(resultados: list[Resultado], sug: dict[str, list[Sugestao]], camin
 
     with caminho.open("w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f, delimiter=";")
-        w.writerow(["Listas"] + [c for c, _ in CAMPOS_CSV] + ["Sinais", "Alertas graves", "Alertas", "Descarte"])
-        for r in sorted(resultados, key=lambda r: (ORDEM_STATUS.index(r.status), -r.score)):
+        w.writerow(["Ranking compra", "Nota compra", "Listas"] + [c for c, _ in CAMPOS_CSV]
+                   + [c for c, _ in EXTRAS_CSV] + ["Sinais", "Alertas graves", "Alertas", "Descarte"])
+        for r in sorted(resultados, key=lambda r: (pos.get(r.ticker, (999,))[0],
+                                                   ORDEM_STATUS.index(r.status), -r.score)):
             listas = ", ".join(CATEGORIAS[c][0] for c in mapa.get(r.ticker, []))
-            w.writerow([listas] + [br(getattr(r, a)) for _, a in CAMPOS_CSV] +
+            rk, nt = pos.get(r.ticker, ("", ""))
+            w.writerow([rk, br(nt), listas] + [br(getattr(r, a)) for _, a in CAMPOS_CSV] +
+                       [br(r.extras.get(a)) for _, a in EXTRAS_CSV] +
                        [" | ".join(r.sinais), " | ".join(r.alertas_graves),
                         " | ".join(r.alertas), " | ".join(r.descarte)])
 
 
-def resumo_terminal(sug: dict[str, list[Sugestao]]) -> str:
+def resumo_terminal(sug: dict[str, list[Sugestao]], compra: list[Sugestao] | None = None) -> str:
     linhas = []
+    if compra is not None:
+        linhas.append(f"\nRANKING DE COMPRA — só compra, foco em dividendos ({len(compra)})")
+        for i, s in enumerate(compra, 1):
+            r = s.r
+            p = " ".join(f"{k[:3]} {dec(v, 0)}" for k, (v, _) in s.partes.items())
+            linhas.append(f"  {i:>2}. {r.ticker:<7} {r.classe:<4} {r.tipo[:12]:<12} {brl(r.preco):>11}  "
+                          f"DY {pct(r.dy12):>6}  margem {pct(r.margem, 0, True):>6}  nota {dec(s.nota, 0):>3}  [{p}]")
+        if not compra:
+            linhas.append("  (nenhum ativo atende hoje)")
     for cat, itens in sug.items():
         linhas.append(f"\n{CATEGORIAS[cat][0].upper()} — {CATEGORIAS[cat][1]} ({len(itens)})")
         for i, s in enumerate(itens[:5], 1):
