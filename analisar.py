@@ -46,6 +46,23 @@ def baixar_historicos(cache: coleta.Cache, tickers: list[str], workers: int) -> 
     return saida
 
 
+def anexar_detalhes(cache: coleta.Cache, linhas: list[dict], workers: int) -> None:
+    """Página de detalhes do Fundamentus (FFO/cota, ativos x PL, dívida/EBITDA) -> linha['_det']."""
+    def tarefa(l):
+        try:
+            return coleta.detalhes(cache, l["Papel"])
+        except Exception as e:
+            print(f"\n  aviso: sem detalhes para {l['Papel']} ({e})", file=sys.stderr)
+            return {}
+
+    if not linhas:
+        return
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for l, det in zip(linhas, ex.map(tarefa, linhas)):
+            l["_det"] = det
+    print(f"  detalhes {len(linhas)}/{len(linhas)} ok")
+
+
 def um_por_empresa(linhas: list[dict]) -> list[dict]:
     """Mantém só o ticker mais líquido de cada empresa (ex.: TAEE11 em vez de TAEE3/TAEE4)."""
     melhor: dict[str, dict] = {}
@@ -68,6 +85,7 @@ def varrer(cache, cfg, so: str | None) -> tuple[list, int]:
         prefiltrados += len(linhas) - len(cand)
         print(f"  {len(linhas)} FIIs, {len(cand)} passam no pré-filtro")
         hist = baixar_historicos(cache, [l["Papel"] for l in cand], workers)
+        anexar_detalhes(cache, cand, workers)
         resultados += [analise.avaliar_fii(l, hist.get(l["Papel"]), cfg) for l in cand]
 
     if so in (None, "acoes"):
@@ -82,6 +100,7 @@ def varrer(cache, cfg, so: str | None) -> tuple[list, int]:
         prefiltrados += len(linhas) - len(cand)
         print(f"  {len(linhas)} empresas nos setores escolhidos, {len(cand)} passam no pré-filtro")
         hist = baixar_historicos(cache, [l["Papel"] for l in cand], workers)
+        anexar_detalhes(cache, cand, workers)
         resultados += [analise.avaliar_acao(l, hist.get(l["Papel"]), cfg, l["_setor"]) for l in cand]
 
     return resultados, prefiltrados
@@ -91,6 +110,8 @@ def analisar_tickers(cache, cfg, tickers: list[str]) -> list:
     fiis = {l["Papel"]: l for l in coleta.fiis(cache)}
     acoes = {l["Papel"]: l for l in coleta.acoes(cache)}
     hist = baixar_historicos(cache, tickers, cfg["geral"]["workers"])
+    anexar_detalhes(cache, [fiis.get(t) or acoes[t] for t in tickers if t in fiis or t in acoes],
+                    cfg["geral"]["workers"])
     resultados = []
     for t in tickers:
         if t in fiis:
@@ -153,13 +174,15 @@ def main() -> int:
     pasta.mkdir(parents=True, exist_ok=True)
     html_path, csv_path = pasta / "relatorio.html", pasta / "dados.csv"
     sug = sugestoes.gerar(resultados, cfg)
+    compra = sugestoes.ranking_compra(resultados, cfg)
     web_path = RAIZ / "web" / "painel.html"
     web_path.parent.mkdir(exist_ok=True)
-    relatorio.gerar_html(resultados, sug, contexto, html_path, web_path if not args.tickers else None)
-    relatorio.gerar_csv(resultados, sug, csv_path)
+    relatorio.gerar_html(resultados, sug, contexto, html_path, web_path if not args.tickers else None,
+                         compra, cfg["compra"]["max_por_grupo"])
+    relatorio.gerar_csv(resultados, sug, csv_path, compra[0])
     shutil.copyfile(html_path, pasta.parent / "ultimo_relatorio.html")
 
-    print(relatorio.resumo_terminal(sug))
+    print(relatorio.resumo_terminal(sug, compra[0]))
     print(f"\nRelatório: {html_path}\nPlanilha:  {csv_path}")
     if args.abrir:
         webbrowser.open(html_path.as_uri())

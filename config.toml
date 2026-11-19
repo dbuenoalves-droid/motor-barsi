@@ -23,6 +23,9 @@ roe_minimo = 0.08
 divida_liq_pl_maxima = 2.5
 anos_minimos_com_proventos = 4       # dos últimos 5 anos
 payout_maximo = 1.0                  # paga mais de 100% do lucro = dividendo insustentável
+# Dívida líquida/EBITDA (só setores não financeiros), da página de detalhes do Fundamentus
+divida_liq_ebitda_alerta = 3.0       # acima: alerta e perde nota nas listas
+divida_liq_ebitda_maxima = 4.0       # acima: alerta grave (fora das listas)
 
 # -----------------------------------------------------------------------------
 [fiis]
@@ -44,6 +47,45 @@ pvp_minimo_papel = 0.70              # papel abaixo disso = mercado precificando
 vacancia_maxima = 0.15
 meses_minimos_com_rendimento = 10    # dos últimos 12
 anos_minimos_historico = 2
+
+# Teto recorrente: no tijolo, o teto usa o MENOR entre proventos pagos e FFO/cota de 12m.
+# Assim lucro com venda de imóvel (não recorrente) não estica o teto (caso TRXF11).
+teto_pelo_ffo = true
+
+# Alavancagem = (Ativos - Patrimônio Líquido) / PL, da página de detalhes do Fundamentus.
+# Capta obrigações por aquisição de imóveis, CRIs emitidos e compromissadas.
+alavancagem_alerta = 0.20            # acima: alerta e perde nota nas listas
+alavancagem_maxima = 0.50            # acima: alerta grave (fora das listas)
+
+# Tipo do FII pela fração do PL em imóveis físicos ("Imóveis/PL do FII" no Fundamentus).
+# O segmento "Multicategoria" mistura fundos de CRI e de tijolo; este número separa.
+tipo_papel_imoveis_pl_max  = 0.10    # abaixo: Papel (CRIs/recebíveis)
+tipo_tijolo_imoveis_pl_min = 0.50    # a partir daqui: Tijolo; entre os dois: Híbrido
+yield_minimo_hibrido = 0.09          # teto do híbrido = rendimento anual / 9%
+yield_minimo_fof     = 0.10          # FoF: só vale se excluir_fof = false
+excluir_fof = true                   # fundos de fundos (FoF) ficam fora: reconhecidos pelo nome
+                                     # ou por tipo = "FoF" em [fiis.manual]
+# Multiestratégia / "hedge fund" imobiliário: misturam cotas de FII, CRIs e imóveis a
+# critério do gestor. Se o NOME tiver um destes termos, o fundo é descartado.
+nomes_multiestrategia = ["HEDGE FUND", "MULTIESTRAT", "MULTI ESTRAT"]
+excluir_hibrido = true               # true: só entram tijolo puro e papel puro
+# Papel: o FFO do Fundamentus fica 10-25% abaixo do distribuído mesmo em bons fundos, então
+# não limita o teto. Abaixo desta cobertura (FFO/cota ÷ proventos), alerta e sai de Dividendos.
+papel_ffo_cobertura_minima = 0.60
+
+# -----------------------------------------------------------------------------
+[fiis.manual]
+# Correções manuais, valem sobre tudo acima. Campos opcionais:
+#   tipo     = "Tijolo" | "Papel" | "Híbrido" | "FoF"
+#   segmento = rótulo exibido no painel (o filtro de escopo continua usando o do Fundamentus)
+#   excluir  = true, motivo = "..."   -> tira o fundo da análise (vai para Furadas)
+RZTR11 = { segmento = "Terras agrícolas" }
+TRXF11 = { segmento = "Renda urbana / varejo" }
+GGRC11 = { segmento = "Logística / industrial" }
+# Sugestões A CONFERIR — tire o '#' só depois de checar o relatório gerencial:
+# RBRL11 = { tipo = "Tijolo", segmento = "Logística" }   # Fundamentus mostra 0 imóveis (via SPE/cotas?)
+# TGAR11 = { tipo = "Híbrido" }                          # CRIs + participação em loteamentos (SPEs)
+# SNEL11 = { tipo = "Híbrido", segmento = "Energia" }    # usinas solares, não é crédito imobiliário
 
 # -----------------------------------------------------------------------------
 [sinais]
@@ -75,16 +117,36 @@ top = 10                                  # quantos ativos por lista
 # Queda de juros: quem mais se valoriza quando a Selic cai.
 # FIIs de papel CDI perdem renda com juros caindo, por isso ficam de fora.
 setores_sensiveis_juros = ["Energia Elétrica", "Saneamento", "Telecomunicações"]
-juros_pvp_maximo = 0.95                   # tijolo/FoF com desconto patrimonial para fechar
+juros_pvp_maximo = 0.95                   # tijolo com desconto patrimonial para fechar
 
 # Dividendos: maior renda HOJE, desde que estável e recorrente
 div_dy_minimo_acao = 0.08
 div_dy_minimo_fii = 0.11
 div_pvp_minimo_papel = 0.85               # papel muito descontado = crédito questionado
 div_tendencia_minima = 0.95               # proventos 12m >= 95% da média
+# FII de papel distribui a correção monetária do CDI/IPCA: gastar 100% da renda corrói o
+# principal. Na nota da lista, o papel entra pelo DY REAL (descontado o IPCA 12m) e o
+# híbrido desconta o IPCA só da parte do PL fora de imóveis; tijolo e ações entram pelo
+# DY nominal (imóvel e empresa corrigem com a inflação).
+div_papel_usa_dy_real = true
 
 # Longo prazo: acumular por anos (Barsi/Kiyosaki)
 longo_roe_minimo = 0.12
 longo_cresc_proventos_minimo = 0.0        # proventos não podem ter encolhido em 3 anos
 longo_pvp_maximo_fii = 1.0
 longo_vacancia_maxima = 0.10
+
+# -----------------------------------------------------------------------------
+[compra]
+# Ranking de compra: só compra (sem sinal de venda), foco exclusivo em dividendos.
+# Parte dos ativos limpos e soma: Renda recorrente (35) + Estabilidade dos proventos (30)
+# + Qualidade e gestão (20) + Preço de entrada (15) − alertas leves.
+top = 15
+max_por_grupo = 4               # no máximo N por setor (ações) / segmento (tijolo) / papel
+tendencia_minima = 0.90         # proventos 12m >= 90% da média de 3 anos
+anos_minimos_historico = 3.0    # FII novo demais não entra
+papel_pvp_minimo = 0.85         # papel abaixo disso: mercado desconfia do crédito
+acao_roe_minimo = 0.10
+acao_payout_maximo = 0.90       # acima disso sobra pouco lucro para manter o dividendo...
+acao_roe_alto = 0.25            # ...exceto com ROE acima disto (negócio que não precisa reinvestir, ex. BBSE3)
+penalidade_alerta = 4           # pontos por alerta leve não pontuado em outro bloco

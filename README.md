@@ -46,9 +46,10 @@ republica o painel. Não depende do seu computador ligado.
 
 | Aba | O que mostra |
 |---|---|
-| **Visão geral** | indicadores, ativos que aparecem em várias listas e o top 5 de cada lista |
+| **Visão geral** | indicadores, top 10 do ranking de compra, ativos em várias listas e o top 5 de cada lista |
+| **Ranking de compra** | só compra, foco em dividendos: nota 0–100 = renda recorrente (35) + estabilidade dos proventos (30) + qualidade e gestão (20) + preço de entrada (15), no máximo 4 por setor/segmento |
 | **Debandada** | padrão TRXF11: caiu muito mais que o índice com a renda preservada |
-| **Queda de juros** | tijolo/FoF com desconto patrimonial e utilities de contratos longos (ciclo Selic + Focus) |
+| **Queda de juros** | tijolo com desconto patrimonial e utilities de contratos longos (ciclo Selic + Focus) |
 | **Dividendos** | maior DY sustentável hoje: estável, recorrente, sem crédito questionado |
 | **Longo prazo** | proventos crescendo há 3+ anos, ROE alto, histórico completo |
 | **Radar completo** | todos os aprovados, com ordenação e busca |
@@ -62,10 +63,15 @@ grave e abaixo do teto). Critérios de cada lista em `config.toml` → `[sugesto
 1. **Perenidade (Barsi)** — ações só de Bancos, Energia, Saneamento, Seguros, Telecom;
    FIIs de logística, papel, renda urbana. Liquidez mínima, lucro, histórico de proventos.
 2. **Preço teto** — menor entre proventos de 12m e média de 3 anos ÷ yield mínimo
-   (ações 6%, FII tijolo 8%, FII papel 10%).
-3. **Ruído x estrutural (3º Axioma)** — se os proventos de 12m caíram abaixo de 80% da
+   (ações 6%, FII tijolo 8%, híbrido 9%, papel 10%). No tijolo e no híbrido, a base também é limitada
+   ao **FFO/cota** de 12m: lucro com venda de imóvel não estica o teto. O CSV traz o
+   "teto bruto" para comparação.
+3. **Balanço** — FII: passivo/PL (obrigações por aquisição, CRIs, compromissadas) acima
+   de 20% perde nota nas listas, acima de 50% é alerta grave. Ação não financeira: dívida
+   líquida/EBITDA acima de 3x perde nota, acima de 4x é alerta grave.
+4. **Ruído x estrutural (3º Axioma)** — se os proventos de 12m caíram abaixo de 80% da
    média, a cota caiu *junto* com a renda → grupo **Estrutural**, não é pechincha.
-4. **Debandada específica (10º Axioma)** — caiu 10+ p.p. a mais que o próprio índice
+5. **Debandada específica (10º Axioma)** — caiu 10+ p.p. a mais que o próprio índice
    (IFIX ou Ibovespa) em 52 semanas, com DY 15%+ acima da média histórica do ativo e,
    no FII, P/VP ≤ 0,90.
 
@@ -77,6 +83,29 @@ grave e abaixo do teto). Critérios de cada lista em `config.toml` → `[sugesto
 | **Vitrine** | bom ativo, mas caro agora |
 | **Descartado** | reprovado em perenidade, liquidez ou histórico |
 
+**Tipo do FII** — definido pela fração do PL em imóveis físicos ("Imóveis/PL" do
+Fundamentus), não pelo segmento, que chama de "Multicategoria" tanto fundo de CRI quanto
+de tijolo: abaixo de 10% = **Papel**, de 10% a 50% = **Híbrido**, acima = **Tijolo**.
+**Fundos de fundos (FoF) ficam fora** (`excluir_fof = true`): são reconhecidos pelo nome;
+um FoF sem "FoF"/"Fundo de Fundos" no nome precisa de `tipo = "FoF"` em `[fiis.manual]`.
+**Multiestratégia / "hedge fund" também ficam fora** (`nomes_multiestrategia`): carteira
+mista que muda a critério do gestor. Qualquer outro fundo sai com
+`TICKER = { excluir = true, motivo = "..." }` em `[fiis.manual]`, e `excluir_hibrido = true`
+deixa só tijolo puro e papel puro. Correções manuais (tipo e rótulo de segmento) ficam em
+`config.toml` → `[fiis.manual]`.
+
+Na lista **Dividendos**, FII de papel é ordenado pelo DY real (descontado o IPCA 12m) e o
+híbrido desconta o IPCA só da parte do PL fora de imóveis, porque a correção monetária
+distribuída repõe o principal. Papel cujo FFO cobre menos de 60% do distribuído recebe
+alerta e fica fora dessa lista.
+
+**Ranking de compra** (`config.toml` → `[compra]`) — parte dos ativos limpos e exige
+proventos em todos os anos, renda de 12m ≥ 90% da média, 3+ anos de histórico, FII pagando
+11+ meses, papel com P/VP ≥ 0,85, ação com ROE ≥ 10% e payout ≤ 90% (liberado quando o
+ROE passa de 25%). "Gestão" é medida por números (ROE, payout, dívida/EBITDA, vacância,
+alavancagem, diversificação de imóveis, confiança no crédito) — não é uma avaliação do
+gestor. O ranking não tem sinal de venda.
+
 Todos os limites ficam em `config.toml`, comentados.
 
 ## Limites (leia antes de usar)
@@ -85,6 +114,8 @@ Todos os limites ficam em `config.toml`, comentados.
   motivo da queda precisa ser confirmado nos links do relatório.
 - Alerta "DY > 1,5× FFO" em tijolo: parte da renda pode vir de venda de imóveis
   (não recorrente). É o caso a checar no TRXF11.
-- Segmentos "Multicategoria/Outros" do Fundamentus misturam escritórios, FoFs etc.
+- Segmentos "Multicategoria/Outros" do Fundamentus misturam escritórios, FoFs etc. O tipo
+  vem do Imóveis/PL, mas fundo que tem imóvel via SPE ou cotas de outro FII aparece com
+  Imóveis/PL baixo — use `[fiis.manual]` para corrigir.
 - Dados: Fundamentus, Yahoo Finance e Banco Central — podem ter atraso ou falhas.
 - Ferramenta de triagem educacional com as suas regras. Não é recomendação de investimento.
