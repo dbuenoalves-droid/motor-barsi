@@ -26,6 +26,13 @@ janelas diferentes, e geravam divergências — por isso foram removidos.
 Rendimentos de FII: últimos 12 meses pela B3 (data-com exata); meses anteriores pelo informe
 mensal da CVM (DY do mês × valor patrimonial da cota) — janelas que não se sobrepõem.
 
+**Sem fonte de reserva automática, de propósito.** Quando a CVM não tem o dado (ex.: o fundo
+repetiu um trimestre no informe), o motor marca "não conferido" em vez de buscar em outro
+site: os sites independentes (Clube FII, Funds Explorer, Status Invest...) leem esse mesmo
+informe, então repetiriam o erro, e o Clube FII proíbe coleta automática por IA no robots.txt.
+Cada card de FII tem links para o relatório gerencial (B3 FundosNET) e para o Clube FII, para
+consulta manual — análises e comentários de investidores ajudam a entender o motivo da queda.
+
 ## Como usar
 
 Duplo clique em `buscar.bat`, ou no terminal:

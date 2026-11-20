@@ -23,6 +23,8 @@ def _links(r: Resultado) -> str:
         cnpj = "".join(ch for ch in (r.extras.get("cnpj") or "") if ch.isdigit())
         doc = (f'<a href="https://fnet.bmfbovespa.com.br/fnet/publico/abrirGerenciadorDocumentosCVM?cnpjFundo={cnpj}" '
                f'target="_blank">Relatórios (B3 FundosNET)</a>' if cnpj else "")
+        # consulta manual (análises e comentários de investidores); o motor não lê dados de lá
+        doc += f'<a href="https://www.clubefii.com.br/fiis/{t}" target="_blank">Clube FII</a>'
     else:
         cod = r.extras.get("code_cvm")
         doc = (f'<a href="https://sistemaswebb3-listados.b3.com.br/listedCompaniesPage/main/{cod}/{t[:4]}/overview?language=pt-br" '

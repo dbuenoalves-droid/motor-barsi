@@ -230,7 +230,8 @@ def avaliar_fii(d: dict, cfg: dict) -> Resultado:
                 f"{pct(r.extras.get('cobertura'), 0)} do distribuído: o teto usa a recorrente — "
                 f"pelos proventos pagos seria {brl(r.teto_bruto)}")
         elif rec.get("por_cota") is None and rec.get("motivo"):
-            r.alertas.append(f"Renda recorrente não conferida: {rec['motivo']}")
+            r.alertas.append(f"Renda recorrente não conferida: {rec['motivo']} — confira o resultado por "
+                             "cota no relatório gerencial (link do FundosNET)")
         if (rec.get("ganhos_por_cota") or 0) > 0 and r.dpa12 and rec["ganhos_por_cota"] / r.dpa12 > 0.10:
             r.alertas.append(f"Ganho com venda de ativos de {brl(rec['ganhos_por_cota'])}/cota em 12m: "
                              "parte da distribuição não se repete")
