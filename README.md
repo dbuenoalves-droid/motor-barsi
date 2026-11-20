@@ -70,12 +70,13 @@ O GitHub Actions roda a varredura de segunda a sexta às 19:00 (Cuiabá) e repub
 1. **Escopo** — FII só entra se tiver pelo menos 67% do total investido em imóveis físicos
    (direto ou via SPE), pelo informe mensal da CVM; segmentos de escritórios, shoppings,
    hospital, hotel, residencial e educacional ficam fora. Ações só de Bancos, Energia,
-   Saneamento, Seguros e Telecom, pela classificação oficial da B3.
+   Saneamento, Seguros e Telecom, pela classificação oficial da B3 — e, entre os bancos, só os
+   grandes (patrimônio de R$ 50 bi ou mais: Itaú, Bradesco, BB, Santander, BTG).
 2. **DY líquido** — proventos de 12 meses ÷ preço, com o IR do JCP descontado (`ir_jcp`).
    Rendimento de FII é isento para pessoa física. Amortização de cotas não conta como renda.
 3. **Preço teto** — menor entre proventos de 12m e média de 3 anos ÷ yield exigido.
-   Ações: 6% (Barsi). FII de tijolo: o maior entre 8% e o **juro real esperado** (Focus:
-   Selic ÷ IPCA do próximo ano) + 1 p.p. — com juros altos o teto aperta sozinho.
+   Ações: 6% (Barsi). FII de tijolo: 8%. Fixos, sem ligação com os juros: o objetivo é
+   acumular renda por anos, não acertar o ciclo da Selic.
 4. **Renda recorrente do FII** — resultado de caixa dos últimos 4 trimestres (CVM) menos
    ganhos com venda de imóveis e títulos, mesma fonte e mesma janela. Se cobrir menos de 90%
    do distribuído, o teto usa a recorrente. Informe repetido ou incompleto na CVM vira alerta

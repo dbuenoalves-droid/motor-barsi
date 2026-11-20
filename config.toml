@@ -23,8 +23,10 @@ setores = { "Financeiro / Intermediários Financeiros / Bancos" = "Bancos", "Uti
 setores_financeiros = ["Bancos", "Seguros"]   # nesses, dívida/EBITDA não se aplica
 
 yield_minimo = 0.06                  # Barsi: preço teto = proventos líquidos / 6%
-# premio_sobre_juro_real = 0.0       # descomente para exigir das ações o juro real esperado + prêmio
 liquidez_minima = 2_000_000          # volume médio diário em R$
+# Só bancos grandes: patrimônio líquido mínimo (CVM). Bancos médios e pequenos têm receita
+# mais instável. 50 bi deixa Itaú, Bradesco, BB, Santander e BTG.
+bancos_pl_minimo = 50_000_000_000
 roe_minimo = 0.08
 anos_minimos_com_proventos = 4       # dos últimos 5 anos
 payout_maximo = 1.0                  # paga mais de 100% do lucro = dividendo insustentável
@@ -42,11 +44,9 @@ segmentos_excluidos = ["Escritórios", "Shoppings", "Hospital", "Hotel", "Reside
 palavras_excluidas = ["OFFICE", "CORPORATE", "LAJE", "ESCRITÓRIO", "ESCRITORIO", "SHOPPING", "MALL",
                       "HOTEL", "HOSPITAL", "RESIDENCIAL", "EDUCACIONAL", "AGÊNCIA", "AGENCIAS"]
 
-# Teto = proventos / yield exigido. Yield exigido = o MAIOR entre o piso e o juro real esperado
-# (Focus: Selic ÷ IPCA do próximo ano) + prêmio. O aluguel é corrigido pela inflação, então o
-# FII compete com o juro real; com juros altos o teto fica mais exigente sozinho.
+# Teto Barsi = proventos / yield fixo, sem ligação com os juros (o objetivo é acumular renda
+# por anos, não acertar o ciclo de juros).
 yield_minimo_tijolo = 0.08
-premio_sobre_juro_real = 0.01
 liquidez_minima = 1_000_000          # volume médio diário em R$
 pvp_maximo = 1.05                    # acima disso = vitrine (pagando caro pelo patrimônio)
 pvp_minimo_suspeito = 0.50           # abaixo: alerta para conferir o laudo dos imóveis
@@ -95,8 +95,6 @@ dy_suspeito = 0.25            # DY > 25% = reprovado (insustentável / extraordi
 # TODAS as listas partem só dos ativos limpos: sem descarte, sem renda caindo,
 # sem alerta grave e abaixo do preço teto.
 top = 10
-setores_sensiveis_juros = ["Energia Elétrica", "Saneamento", "Telecomunicações"]
-juros_pvp_maximo = 0.95
 div_dy_minimo_acao = 0.08            # DY líquido (JCP já com IR descontado)
 div_dy_minimo_fii = 0.10
 div_tendencia_minima = 0.95

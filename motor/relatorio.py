@@ -331,7 +331,7 @@ main{max-width:1440px;margin:0 auto;padding-block:22px 40px}
 .panel-h{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px}
 .panel h3{margin:0;font-size:16px}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-weight:600}
 .ver{font-size:12.5px;text-decoration:none;color:var(--mut);font-weight:600}.ver:hover{color:var(--tx)}
-.quad{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.quad{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
 @media (max-width:1000px){.quad{grid-template-columns:1fr}}
 .quad .panel{border-top:3px solid var(--neu);margin:0}
 .b-deb{border-top-color:var(--deb)!important}.b-jur{border-top-color:var(--jur)!important}
@@ -445,9 +445,6 @@ def _faixa_contexto(contexto: dict) -> str:
         itens.append(f'<div><span>Focus {ano}</span><b>{pct(v, 2)}</b></div>')
     if contexto.get("ipca"):
         itens.append(f'<div><span>IPCA 12m</span><b>{pct(contexto["ipca"][0], 2)}</b></div>')
-    if contexto.get("juro_real") is not None:
-        itens.append(f'<div><span>Juro real esperado {contexto.get("juro_real_ano", "")}</span>'
-                     f'<b>{pct(contexto["juro_real"], 2)}</b></div>')
     for nome, q in contexto.get("indices", []):
         itens.append(f'<div><span>{_e(nome)}</span><b class="{"up" if q < 0 else "dn"}">{pct(q, 0)}</b></div>')
     if contexto.get("cotacoes_ate"):
@@ -487,10 +484,10 @@ def gerar_html(resultados: list[Resultado], sug: dict[str, list[Sugestao]], cont
 </div><div class="ctx"><div class="ctx-in">{_faixa_contexto(contexto)}</div></div></header>
 <main>{''.join(paginas)}</main>
 <footer><div class="panel"><b>Como o motor decide</b><ul>
-<li><b>Escopo</b>: só ativos físicos — FIIs de tijolo (pelo menos 67% do investido em imóveis, pelo informe da CVM) e ações de Bancos, Energia, Saneamento, Seguros e Telecom (classificação oficial da B3). Fundos de papel, de fundos e híbridos não entram.</li>
+<li><b>Escopo</b>: só ativos físicos — FIIs de tijolo (pelo menos 67% do investido em imóveis, pelo informe da CVM) e ações de Bancos (só os grandes, patrimônio acima de R$ 50 bi), Energia, Saneamento, Seguros e Telecom (classificação oficial da B3). Fundos de papel, de fundos e híbridos não entram.</li>
 <li><b>Limpo</b> = liquidez, lucro, histórico completo de proventos, renda de 12m ≥ 80% da média de 3 anos, sem alerta grave (payout &gt; 100%, DY &gt; 25%, vacância alta, dívida alta, corte recente) e preço abaixo do teto.</li>
 <li><b>DY líquido</b> (o que cai na conta): proventos de 12 meses ÷ preço, já sem o IR. <b>Isento</b>: rendimento de FII e dividendo de ação. <b>Tem IR</b>: JCP, com 17,5% retido na fonte no próprio pagamento (LC 224/2025, desde 01/01/2026) — o card mostra a conta bruto − IR = líquido. Proventos não têm tabela regressiva (ela é da renda fixa). Amortização de cotas não conta como renda.</li>
-<li><b>Teto Barsi</b> = menor entre proventos de 12m e média de 3 anos ÷ yield exigido. Ações: 6% (Barsi). FII de tijolo: o maior entre 8% e o juro real esperado pelo Focus + 1 p.p. No FII, se a renda recorrente da CVM (sem ganho com venda de imóveis) cobrir menos de 90% do distribuído, o teto usa a recorrente.</li>
+<li><b>Teto Barsi</b> = menor entre proventos de 12m e média de 3 anos ÷ yield exigido. Ações: 6% (Barsi). FII de tijolo: 8%. Fixos, sem ligação com os juros: o objetivo é acumular renda por anos. No FII, se a renda recorrente da CVM (sem ganho com venda de imóveis) cobrir menos de 90% do distribuído, o teto usa a recorrente.</li>
 <li><b>Dívida</b>: FII com securitização + compras a prazo acima de 20% do ativo e empresa com dívida líquida acima de 3x o EBITDA perdem nota; acima de 40% / 4x, saem das listas.</li>
 <li><b>Nota</b> 0–100 é específica de cada lista; serve para ordenar, não para comparar listas entre si.</li>
 <li>O motor não lê notícias nem relatórios gerenciais: use os links de cada card para confirmar o motivo da queda antes de decidir.</li>

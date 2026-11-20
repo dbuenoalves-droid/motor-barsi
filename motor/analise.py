@@ -288,6 +288,10 @@ def avaliar_acao(d: dict, cfg: dict) -> Resultado:
         r.descarte.append(f"Sem lucro de 12 meses na CVM ({k.get('erro') or 'demonstrações incompletas'})")
     elif lucro <= 0:
         r.descarte.append("Empresa com prejuízo nos últimos 12 meses (CVM)")
+    pl_min = a.get("bancos_pl_minimo")
+    if r.segmento == "Bancos" and pl_min and (pl or 0) < pl_min:
+        r.descarte.append(f"Banco médio/pequeno (patrimônio de {mi(pl)}, abaixo de {mi(pl_min)}): "
+                          "receita mais instável — Barsi fica com os grandes bancos")
     roe = lucro / pl if lucro is not None and pl and pl > 0 else None
     ebitda = ((k.get("ebit_12m") or 0) + (k.get("da_12m") or 0)) if k.get("ebit_12m") is not None else None
     div_liq = ((k.get("divida_bruta") or 0) - (k.get("caixa") or 0)

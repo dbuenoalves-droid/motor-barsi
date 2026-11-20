@@ -27,9 +27,6 @@ CATEGORIAS = {
     "debandada": ("Debandada", "Padrão TRXF11",
                   "Bons pagadores que caíram bem mais que o próprio índice enquanto a renda continuou "
                   "sendo paga. O mercado vendeu a cota, não o negócio."),
-    "juros": ("Queda de juros", "Ganham com Selic menor",
-              "Ativos de prazo longo que tendem a se valorizar com o ciclo de cortes: FIIs de tijolo "
-              "com desconto patrimonial e empresas de serviços públicos com contratos longos."),
     "dividendos": ("Dividendos", "Maior renda hoje",
                    "Maior DY líquido sustentável agora: renda estável, paga todo mês/ano e coberta "
                    "pela renda recorrente."),
@@ -78,29 +75,6 @@ def _debandada(r: Resultado, cfg: dict) -> Sugestao | None:
     if r.status != OPORTUNIDADE or not limpo(r):
         return None
     return Sugestao(r, r.score, r.sinais[:] + [_teto_txt(r), _renda(r)])
-
-
-def _juros(r: Resultado, cfg: dict) -> Sugestao | None:
-    sg = cfg["sugestoes"]
-    if not limpo(r):
-        return None
-    if r.classe == "FII":
-        if r.pvp is None or r.pvp > sg["juros_pvp_maximo"]:
-            return None
-        nota = (40 * _lim(1 - r.pvp, 0.40) + 20 * _lim(_queda(r), 0.30)
-                + 20 * _lim(r.margem, 0.50) + 20 * _lim(r.tendencia, 1.0))
-        mot = [f"Tijolo a P/VP {dec(r.pvp)}: com juros menores, o desconto de "
-               f"{pct(1 - r.pvp, 0)} sobre o patrimônio tende a fechar"]
-    else:
-        if r.segmento not in sg["setores_sensiveis_juros"]:
-            return None
-        nota = (30 * _lim(-(r.queda52 or 0), 0.30) + 30 * _lim(r.margem, 0.50)
-                + 20 * _lim(r.expansao_dy, 0.50) + 20 * _lim(r.extras.get("roe"), 0.25))
-        mot = [f"{r.segmento}: receita regulada e de contratos longos — o valor sobe quando a curva de juros cai"]
-    if r.queda52 is not None and r.queda52 < -0.05:
-        mot.append(f"Ainda {pct(-r.queda52, 0)} abaixo da máxima de 12 meses")
-    mot += [_teto_txt(r), _renda(r)]
-    return Sugestao(r, nota, mot)
 
 
 def _dividendos(r: Resultado, cfg: dict) -> Sugestao | None:
@@ -170,7 +144,7 @@ def _longo(r: Resultado, cfg: dict) -> Sugestao | None:
     return Sugestao(r, nota, mot)
 
 
-_FUNCOES = {"debandada": _debandada, "juros": _juros, "dividendos": _dividendos, "longo": _longo}
+_FUNCOES = {"longo": _longo, "dividendos": _dividendos, "debandada": _debandada}
 
 
 def gerar(resultados: list[Resultado], cfg: dict) -> dict[str, list[Sugestao]]:
