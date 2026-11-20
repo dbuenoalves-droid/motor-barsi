@@ -46,13 +46,8 @@ def limpo(r: Resultado) -> bool:
 
 
 def renda_sustentavel(r: Resultado) -> float | None:
-    """DY líquido anual que se repete: o pago em 12m, ou a renda recorrente da CVM se for menor (FII)."""
-    if r.dy12 is None:
-        return None
-    rec = r.extras.get("recorrente")
-    if r.classe == "FII" and rec is not None and r.preco:
-        return min(r.dy12, max(rec, 0) / r.preco)
-    return r.dy12
+    """Renda líquida anual que se repete (campo único r.rl, calculado no motor)."""
+    return r.rl
 
 
 def atinge_meta(r: Resultado, cfg: dict) -> bool:
@@ -145,26 +140,26 @@ def _debandada(r: Resultado, cfg: dict) -> Sugestao | None:
 
 def _dividendos(r: Resultado, cfg: dict) -> Sugestao | None:
     sg = cfg["sugestoes"]
-    if not limpo(r) or r.dy12 is None:
+    if not limpo(r) or r.rl is None:
         return None
     if (r.tendencia or 0) < sg["div_tendencia_minima"] or (r.extras.get("consistencia") or 0) < 1:
         return None
     fii = r.classe == "FII"
     if fii:
-        if r.dy12 < sg["div_dy_minimo_fii"] or (r.extras.get("meses_pagos_12m") or 0) < 11:
+        if r.rl < sg["div_dy_minimo_fii"] or (r.extras.get("meses_pagos_12m") or 0) < 11:
             return None
         if (r.extras.get("ritmo_recente") or 1) < 0.90:
             return None
         cob = r.extras.get("cobertura")
         if cob is None or cob < cfg["fiis"]["cobertura_recorrente_minima"]:
             return None   # renda recorrente não conferida na CVM, ou distribui mais do que ela gera
-    elif r.dy12 < sg["div_dy_minimo_acao"]:
+    elif r.rl < sg["div_dy_minimo_acao"]:
         return None
     cv = r.extras.get("cv_rend")
     estab = 1 - min(1.0, cv / 0.30) if cv is not None else 0.5
-    nota = (50 * _lim(r.dy12 - 0.06, 0.12) + 20 * estab
+    nota = (50 * _lim(r.rl - 0.06, 0.12) + 20 * estab
             + 15 * _lim((r.tendencia or 0) - 0.80, 0.40) + 15 * _lim(r.margem, 0.50))
-    mot = [f"DY líquido de {pct(r.dy12)} " + (f"pago em {r.extras.get('meses_pagos_12m')}/12 meses" if fii else
+    mot = [f"Renda líquida de {pct(r.rl)} " + (f"pago em {r.extras.get('meses_pagos_12m')}/12 meses" if fii else
                                                f"com proventos em {r.extras.get('anos_com_proventos')}/"
                                                f"{r.extras.get('janelas_anos')} anos")]
     if cv is not None:
@@ -262,7 +257,7 @@ def _nota_compra(r: Resultado, cfg: dict) -> Sugestao | None:
 
     mot: list[str] = []
     # ---- 1. Renda recorrente (35): base conservadora do teto ÷ preço (líquida de IR)
-    dy_rec = x["dpa_base"] / r.preco
+    dy_rec = r.rl or 0
     renda = 35 * _lim(dy_rec - 0.05, 0.09)
     mot.append(f"Renda recorrente líquida de {pct(dy_rec)} ao ano — {_renda(r)}")
 

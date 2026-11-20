@@ -46,7 +46,8 @@ class Resultado:
     margem: float | None = None
     dpa12: float | None = None
     dpa_media: float | None = None
-    dy12: float | None = None
+    dy12: float | None = None       # DY líquido PAGO nos últimos 12 meses
+    rl: float | None = None         # RENDA LÍQUIDA SUSTENTÁVEL (a.a.): o número exibido e usado nas decisões
     dy_medio: float | None = None
     expansao_dy: float | None = None
     queda52: float | None = None
@@ -130,6 +131,7 @@ def _aplicar_historico(r: Resultado, m: dict, yield_alvo: float, cfg: dict,
             r.renda_mil = 1000 * r.dy12 / 12
         if m.get("max52"):
             r.queda52 = r.preco / m["max52"] - 1
+    r.rl = r.dy12
     r.dy_medio = m.get("dy_medio")
     if r.dy12 and r.dy_medio:
         r.expansao_dy = r.dy12 / r.dy_medio - 1
@@ -224,6 +226,10 @@ def avaliar_fii(d: dict, cfg: dict) -> Resultado:
         _aplicar_historico(r, m, y, cfg, rec.get("por_cota"), f["cobertura_recorrente_minima"])
         if r.dpa12 and rec.get("por_cota") is not None:
             r.extras["cobertura"] = rec["por_cota"] / r.dpa12
+        # renda sustentável: se a recorrente da CVM for menor que o pago, é ela que se repete
+        if r.dy12 is not None and rec.get("por_cota") is not None and r.preco:
+            r.rl = min(r.dy12, max(rec["por_cota"], 0) / r.preco)
+            r.renda_mil = 1000 * r.rl / 12
         if r.teto_bruto:
             r.alertas.append(
                 f"Renda recorrente de {brl(rec['por_cota'])}/cota em 12m (CVM) cobre só "
@@ -365,7 +371,7 @@ def _concluir(r: Resultado, cfg: dict, fii: bool) -> None:
             r.sinais.append(f"Cota {pct(-r.queda52, 0)} abaixo da máxima de 12 meses")
     sinal_dy = r.expansao_dy is not None and r.expansao_dy >= s["expansao_dy_minima"]
     if sinal_dy:
-        r.sinais.append(f"DY {pct(r.dy12)} contra média histórica de {pct(r.dy_medio)}")
+        r.sinais.append(f"DY pago {pct(r.dy12)} contra média histórica de {pct(r.dy_medio)}")
     sinal_pvp = bool(fii and r.pvp and r.pvp <= s["pvp_desconto"])
     if sinal_pvp:
         r.sinais.append(f"P/VP {dec(r.pvp)} ({pct(1 - r.pvp, 0)} abaixo do patrimônio)")

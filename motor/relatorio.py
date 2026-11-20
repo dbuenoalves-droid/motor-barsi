@@ -73,14 +73,18 @@ def _linha_sinal(r: Resultado) -> str:
 
 def _conta_ir(r: Resultado) -> str:
     """Linha com o que cai na conta: sempre o líquido; se tiver IR, a conta bruto − IR = líquido."""
-    liq = r.dy12
+    liq = r.rl
     if liq is None:
         return ""
+    pago = r.dy12 or liq
+    extra = (f' Nos últimos 12 meses pagou {pct(pago)} ({pct(_mes(pago), 2)} ao mês), mas a renda recorrente '
+             f'informada à CVM sustenta {pct(liq)}: a diferença veio de reserva ou de venda de imóveis e '
+             f'não se repete.') if pago - liq > 0.0005 else ''
     if r.extras.get("isento", True):
         motivo = ("rendimento de FII é isento para pessoa física" if r.classe == "FII"
                   else "só dividendos, sem JCP")
         return (f'<div class="conta ok"><b>Líquido: {pct(liq)} ao ano · {pct(_mes(liq), 2)} ao mês</b>'
-                f'<span>Isento — {motivo}. O que aparece é o que cai na conta.</span></div>')
+                f'<span>Isento — {motivo}. O que aparece é o que cai na conta.{extra}</span></div>')
     bruto = r.extras.get("dy_bruto") or liq
     ir = bruto - liq
     jcp = r.extras.get("jcp_frac") or 0
@@ -110,7 +114,8 @@ def _card(s: Sugestao, rank: int, cat: str, mapa: dict) -> str:
         _metrica("Preço", brl(r.preco)),
         _metrica("Teto Barsi", brl(r.teto)),
         _metrica("Margem", pct(r.margem, 0, True), _sinal(r.margem)),
-        _metrica("DY líquido 12m", pct(r.dy12), "pos", f"{pct(_mes(r.dy12), 2)} ao mês"),
+        _metrica("Renda líquida", pct(r.rl), "pos", f"{pct(_mes(r.rl), 2)} ao mês"
+                 + (f" · pagou {pct(r.dy12)}" if r.dy12 and r.rl is not None and r.dy12 - r.rl > 0.0005 else "")),
         quinta,
         _metrica("Queda 12m", pct(r.queda52, 0), "neg" if (r.queda52 or 0) < -0.10 else ""),
     ])
@@ -217,7 +222,7 @@ def _visao_geral(sug: dict, mapa: dict, kpis: str, compra: list[Sugestao] | None
         titulo, sub, _ = CATEGORIAS[cat]
         linhas = "".join(
             f'<a class="mini" href="#{cat}"><span class="rank sm c-{COR[cat]}">{i}</span>'
-            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · DY líq. {pct(s.r.dy12)} · '
+            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · {pct(_mes(s.r.rl), 2)}/mês líquido · '
             f'{"isento" if s.r.extras.get("isento", True) else "tem IR"}</span><em>{dec(s.nota, 0)}</em></a>'
             for i, s in enumerate(itens[:5], 1)) or '<div class="mut pad">Sem sugestões hoje.</div>'
         paineis.append(f"""<div class="panel b-{COR[cat]}">
@@ -227,8 +232,8 @@ def _visao_geral(sug: dict, mapa: dict, kpis: str, compra: list[Sugestao] | None
     if compra:
         linhas = "".join(
             f'<a class="mini" href="#compra"><span class="rank sm c-cmp">{i}</span>'
-            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · {_e(s.r.tipo)} · DY líq. {pct(s.r.dy12)} '
-            f'({pct(_mes(s.r.dy12), 2)}/mês) · {"isento" if s.r.extras.get("isento", True) else "tem IR"}'
+            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · {_e(s.r.tipo)} · {pct(_mes(s.r.rl), 2)}/mês líquido '
+            f'({pct(s.r.rl)} ao ano) · {"isento" if s.r.extras.get("isento", True) else "tem IR"}'
             f'</span><em>{dec(s.nota, 0)}</em></a>'
             for i, s in enumerate(compra[:10], 1))
         destaque = f"""<div class="panel b-cmp topo">
@@ -239,7 +244,7 @@ def _visao_geral(sug: dict, mapa: dict, kpis: str, compra: list[Sugestao] | None
         linhas = "".join(
             f'<a class="mini" href="#selecao"><span class="rank sm c-sel">{i}</span>'
             f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · {_e(s.r.segmento)} · '
-            f'<b class="pos">{pct(_mes(s.r.extras.get("renda_sust") or s.r.dy12), 2)}/mês líquido</b> · queda {pct(s.r.queda52, 0)} em 12m · '
+            f'<b class="pos">{pct(_mes(s.r.rl), 2)}/mês líquido</b> · queda {pct(s.r.queda52, 0)} em 12m · '
             f'{"isento" if s.r.extras.get("isento", True) else "tem IR"}</span><em>{dec(s.nota, 0)}</em></a>'
             for i, s in enumerate(sel, 1)) or ('<div class="mut pad">Nenhum ativo passa no filtro dos filtros hoje: '
                                                 'nenhum bom pagador limpo e em queda rendendo a meta mensal.</div>')
@@ -275,7 +280,7 @@ def _radar(resultados: list[Resultado], mapa: dict) -> str:
             f'<td>{_e(r.classe)}</td><td>{_e(r.tipo)}</td>'
             + _td(brl(r.preco), r.preco) + _td(brl(r.teto), r.teto)
             + _td(pct(r.margem, 0, True), r.margem, _sinal(r.margem))
-            + _td(f'<b class="pos">{pct(r.dy12)}</b>', r.dy12) + _td(pct(_mes(r.dy12), 2), _mes(r.dy12))
+            + _td(f'<b class="pos">{pct(r.rl)}</b>', r.rl) + _td(pct(_mes(r.rl), 2), _mes(r.rl))
             + f'<td>{_selo_ir(r)}</td>'
             + _td(pct(r.extras.get("dy_bruto") or r.dy12), r.extras.get("dy_bruto") or r.dy12)
             + _td(pct(r.dy_medio), r.dy_medio)
@@ -286,7 +291,7 @@ def _radar(resultados: list[Resultado], mapa: dict) -> str:
             + _td(pct(r.cresc_dpa, 1, True), r.cresc_dpa, _sinal(r.cresc_dpa))
             + _td(f'<span class="score">{dec(r.score, 0)}</span>', r.score)
             + f"<td>{listas}</td></tr>")
-    cab = ["Ativo", "Sinal", "Classe", "Tipo", "Preço", "Teto", "Margem", "DY líquido", "Líquido/mês", "IR", "DY bruto",
+    cab = ["Ativo", "Sinal", "Classe", "Tipo", "Preço", "Teto", "Margem", "Renda líquida", "Líquida/mês", "IR", "Pago 12m (bruto)",
            "DY médio", "P/VP", "ROE",
            "Queda 12m", "vs índice", "Renda vs média", "Cresc. proventos", "Score", "Listas"]
     ths = "".join(f"<th>{c}</th>" for c in cab)
@@ -324,7 +329,7 @@ def _descartes(resultados: list[Resultado]) -> str:
         linhas.append(
             f"<tr><td><b>{_e(r.ticker)}</b><div class='sub'>{_e(r.nome.title()[:34])}</div></td>"
             f"<td>{_e(r.classe)}</td><td><span class='pill {cls}'>{rot}</span></td>"
-            f"<td class='n'>{pct(r.dy12)} {_selo_ir(r)}</td><td class='n'>{pct(r.queda52, 0)}</td>"
+            f"<td class='n'>{pct(r.rl)} {_selo_ir(r)}</td><td class='n'>{pct(r.queda52, 0)}</td>"
             f"<td class='mot'>{'<br>'.join(_e(m) for m in motivos)}</td></tr>")
     return f"""<section class="page" id="p-furadas" hidden>
 <div class="hero h-neg"><div><div class="eyebrow">3º Axioma de Zurique</div><h2>Furadas e descartes</h2>
@@ -332,7 +337,7 @@ def _descartes(resultados: list[Resultado]) -> str:
 prejuízo, payout insustentável, dívida ou vacância altas, corte recente ou preço acima do teto. Nenhum deles entra em lista
 de sugestão. Fundos de papel, de fundos e híbridos nem entram na análise.</p></div>
 <div class="hero-n"><b>{len(furadas)}</b><span>barrados</span></div></div>
-<div class="panel"><div class="tw"><table><thead><tr><th>Ativo</th><th>Classe</th><th>Situação</th><th>DY líquido</th>
+<div class="panel"><div class="tw"><table><thead><tr><th>Ativo</th><th>Classe</th><th>Situação</th><th>Renda líquida</th>
 <th>Queda 12m</th><th>Motivo</th></tr></thead><tbody>{''.join(linhas)}</tbody></table></div></div></section>"""
 
 
@@ -562,7 +567,7 @@ CAMPOS_CSV = [
     ("Status", "status"), ("Classe", "classe"), ("Ticker", "ticker"), ("Nome", "nome"),
     ("Segmento", "segmento"), ("Tipo", "tipo"), ("Preço", "preco"), ("Teto", "teto"),
     ("Teto pelos proventos pagos", "teto_bruto"),
-    ("Margem", "margem"), ("DPA 12m líquido", "dpa12"), ("DPA média", "dpa_media"), ("DY 12m líquido", "dy12"),
+    ("Margem", "margem"), ("DPA 12m líquido", "dpa12"), ("DPA média", "dpa_media"), ("DY 12m líquido pago", "dy12"), ("Renda líquida sustentável", "rl"),
     ("DY médio", "dy_medio"), ("Expansão DY", "expansao_dy"), ("Queda 12m", "queda52"),
     ("Queda vs índice", "queda_rel"), ("P/VP", "pvp"), ("Renda vs média", "tendencia"),
     ("Cresc. proventos 3a", "cresc_dpa"), ("Liquidez", "liquidez"), ("Renda/mês R$1k", "renda_mil"),
@@ -610,7 +615,7 @@ def resumo_terminal(sug: dict[str, list[Sugestao]], compra: list[Sugestao] | Non
         linhas.append(f"\nSELEÇÃO — filtro dos filtros ({len(sel)})")
         for i, s in enumerate(sel, 1):
             r = s.r
-            linhas.append(f"  {i}. {r.ticker:<7} {r.classe:<4} {brl(r.preco):>11}  {pct(_mes(r.extras.get('renda_sust') or r.dy12), 2):>6}/mês líq  "
+            linhas.append(f"  {i}. {r.ticker:<7} {r.classe:<4} {brl(r.preco):>11}  {pct(_mes(r.rl), 2):>6}/mês líq  "
                           f"queda {pct(r.queda52, 0):>5}  {'isento' if r.extras.get('isento', True) else 'tem IR'}  "
                           f"nota {dec(s.nota, 0)}")
         if not sel:
@@ -621,14 +626,14 @@ def resumo_terminal(sug: dict[str, list[Sugestao]], compra: list[Sugestao] | Non
             r = s.r
             p = " ".join(f"{k[:3]} {dec(v, 0)}" for k, (v, _) in s.partes.items())
             linhas.append(f"  {i:>2}. {r.ticker:<7} {r.classe:<4} {r.tipo[:12]:<12} {brl(r.preco):>11}  "
-                          f"DY líq {pct(r.dy12):>6}  margem {pct(r.margem, 0, True):>6}  nota {dec(s.nota, 0):>3}  [{p}]")
+                          f"{pct(_mes(r.rl), 2):>6}/mês líq  margem {pct(r.margem, 0, True):>6}  nota {dec(s.nota, 0):>3}  [{p}]")
         if not compra:
             linhas.append("  (nenhum ativo atende hoje)")
     for cat, itens in sug.items():
         linhas.append(f"\n{CATEGORIAS[cat][0].upper()} — {CATEGORIAS[cat][1]} ({len(itens)})")
         for i, s in enumerate(itens[:5], 1):
             r = s.r
-            linhas.append(f"  {i}. {r.ticker:<7} {r.classe:<4} {brl(r.preco):>11}  DY líq {pct(r.dy12):>6}  "
+            linhas.append(f"  {i}. {r.ticker:<7} {r.classe:<4} {brl(r.preco):>11}  {pct(_mes(r.rl), 2):>6}/mês líq  "
                           f"margem {pct(r.margem, 0, True):>6}  nota {dec(s.nota, 0)}")
         if not itens:
             linhas.append("  (nenhum ativo atende hoje)")

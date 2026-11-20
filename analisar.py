@@ -358,7 +358,6 @@ def main() -> int:
     for r in resultados:   # sinal do mês (Acumular/Aguardar/Pausar/Parar) e meta de renda
         r.extras["sinal"] = sugestoes.sinal(r, cfg)
         r.extras["meta"] = sugestoes.atinge_meta(r, cfg)
-        r.extras["renda_sust"] = sugestoes.renda_sustentavel(r)
     sug = sugestoes.gerar(resultados, cfg)
     compra = sugestoes.ranking_compra(resultados, cfg)
     sel = sugestoes.selecao(resultados, cfg)
