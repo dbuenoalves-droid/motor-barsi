@@ -8,7 +8,10 @@
 [geral]
 anos_media_proventos = 3      # média de proventos usada no preço teto (Barsi)
 anos_cotacao = 2              # anos completos de cotação B3 além do ano corrente
-ir_jcp = 0.15                 # IR retido na fonte sobre JCP (confira a alíquota vigente)
+# IR sobre proventos de ações (pessoa física), descontado no mês do pagamento:
+#   dividendos = isentos; JCP = retido na fonte. Desde 01/01/2026: 17,5% (LC 224/2025).
+#   Rendimento de FII = isento. Não há tabela regressiva em proventos (ela é da renda fixa).
+ir_jcp = 0.175
 workers = 4                   # consultas simultâneas à B3
 pasta_relatorios = "relatorios"
 pasta_cache = "cache"

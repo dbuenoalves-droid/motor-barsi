@@ -208,7 +208,7 @@ def avaliar_fii(d: dict, cfg: dict) -> Resultado:
     va = cvm.get("valor_ativo") or 0
     alav = cvm.get("divida", 0) / va if va else None
     rec = cvm.get("recorrente") or {}
-    r.extras.update(alavancagem=alav, securitizacao=cvm.get("securitizacao"),
+    r.extras.update(isento=True, alavancagem=alav, securitizacao=cvm.get("securitizacao"),
                     obrig_aquisicao=cvm.get("obrig_aquisicao"), vacancia=cvm.get("vacancia"),
                     imoveis=cvm.get("qtd_imoveis"), venc_12m=cvm.get("venc_12m"),
                     acima_36m=cvm.get("acima_36m"), vp_cota=vp, cvm_ref=cvm.get("data_ref"),
@@ -305,6 +305,11 @@ def avaliar_acao(d: dict, cfg: dict) -> Resultado:
     else:
         y = yield_minimo(a["yield_minimo"], a.get("premio_sobre_juro_real"), cfg.get("_juro_real"))
         _aplicar_historico(r, m, y, cfg)
+        # DY bruto (antes do IR) para mostrar a conta bruto − IR = líquido
+        agora = time.time()
+        bruto12 = sum(v for t, v in d.get("dividendos_brutos") or [] if agora - ANO < t <= agora)
+        if r.preco and bruto12:
+            r.extras["dy_bruto"] = bruto12 / r.preco
         exigido = min(a["anos_minimos_com_proventos"], m["janelas_anos"])
         if m["janelas_anos"] < 2:
             r.descarte.append("Histórico curto")
@@ -312,9 +317,8 @@ def avaliar_acao(d: dict, cfg: dict) -> Resultado:
             r.descarte.append(
                 f"Pagou proventos em só {m['anos_com_proventos']} dos últimos {m['janelas_anos']} anos")
 
-    if (d.get("jcp_frac") or 0) > 0.05:
-        r.alertas.append(f"{pct(d['jcp_frac'], 0)} dos proventos em JCP: o DY mostrado já desconta "
-                         f"{pct(cfg['geral']['ir_jcp'], 0)} de IR na fonte")
+    r.extras["isento"] = (d.get("jcp_frac") or 0) < 0.005
+    r.extras["ir_jcp"] = cfg["geral"]["ir_jcp"]
     if roe is not None and roe < a["roe_minimo"]:
         r.alertas_graves.append(f"ROE baixo ({pct(roe)})")
     if div_ebitda is not None:

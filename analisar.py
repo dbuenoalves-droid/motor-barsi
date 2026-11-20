@@ -81,8 +81,10 @@ def precos_ajustados(serie: dict, eventos) -> list[tuple[float, float, float]]:
 
 
 def proventos_de(prov: dict, isin: str, eventos, ir_jcp: float, fii: bool):
-    """(lista [(data-com, valor líquido ajustado)], fração em JCP). Amortização não é renda."""
-    vistos, out, bruto, jcp = set(), [], 0.0, 0.0
+    """(líquidos [(data-com, valor)], brutos [(data-com, valor)], fração em JCP), ajustados por
+    desdobramentos. Líquido = o que cai na conta: dividendo e rendimento de FII isentos, JCP com IR
+    retido na fonte no próprio pagamento. Amortização de cotas não é renda."""
+    vistos, out, brutos, bruto, jcp = set(), [], [], 0.0, 0.0
     agora = time.time()
     for c in prov.get("cashDividends") or []:
         if c.get("isinCode") != isin:
@@ -109,9 +111,12 @@ def proventos_de(prov: dict, isin: str, eventos, ir_jcp: float, fii: bool):
             continue
         if t > agora - analise.ANO:
             bruto += v
-        out.append((t, liquido / fator_ajuste(t, eventos)))
+        f = fator_ajuste(t, eventos)
+        out.append((t, liquido / f))
+        brutos.append((t, v / f))
     out.sort()
-    return out, (jcp / bruto if bruto else 0.0)
+    brutos.sort()
+    return out, brutos, (jcp / bruto if bruto else 0.0)
 
 
 def proventos_totais_12m(prov: dict, eventos) -> float | None:
@@ -173,7 +178,7 @@ def montar_fii(cache, cfg, cot, tk, cvm, ult) -> dict:
         prov = {}
     ev = eventos_de(prov, {s["isin"]})
     d["precos"] = precos_ajustados(s, ev)
-    recentes, _ = proventos_de(prov, s["isin"], ev, 0.0, fii=True)
+    recentes, _, _ = proventos_de(prov, s["isin"], ev, 0.0, fii=True)
     # B3 traz ~12 meses com data-com exata; antes disso, o rendimento mensal oficial do informe da CVM
     inicio_b3 = recentes[0][0] if recentes else time.time()
     antigos = [(t, v / fator_ajuste(t, ev)) for t, v in (cvm or {}).get("rendimentos_mensais", [])
@@ -217,7 +222,8 @@ def montar_acao(cache, cfg, cot, tk, empresa, detalhe, fund, ult) -> dict:
     extra = [{"isinCode": s["isin"], "label": h.get("corporateAction"), "lastDatePrior": h.get("lastDatePriorEx"),
               "rate": h.get("valueCash")} for h in hist if (h.get("typeStock") or "").strip() == classe]
     prov_total = dict(prov, cashDividends=(prov.get("cashDividends") or []) + extra)
-    d["dividendos"], d["jcp_frac"] = proventos_de(prov_total, s["isin"], ev, cfg["geral"]["ir_jcp"], fii=False)
+    d["dividendos"], d["dividendos_brutos"], d["jcp_frac"] = proventos_de(
+        prov_total, s["isin"], ev, cfg["geral"]["ir_jcp"], fii=False)
     d["proventos_total_12m"] = proventos_totais_12m(prov, ev)
     d["listado_desde"] = listado(prov.get("quotedPerSharSince"))
     return d

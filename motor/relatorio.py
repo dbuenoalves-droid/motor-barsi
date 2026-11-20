@@ -38,8 +38,40 @@ def _sinal(v: float | None, bom_positivo: bool = True) -> str:
     return "pos" if (v >= 0) == bom_positivo else "neg"
 
 
-def _metrica(rotulo: str, valor: str, cls: str = "") -> str:
-    return f'<div class="m"><span>{_e(rotulo)}</span><b class="{cls}">{valor}</b></div>'
+def _metrica(rotulo: str, valor: str, cls: str = "", sub: str = "") -> str:
+    s = f'<small>{_e(sub)}</small>' if sub else ""
+    return f'<div class="m"><span>{_e(rotulo)}</span><b class="{cls}">{valor}</b>{s}</div>'
+
+
+def _mes(dy_ano: float | None) -> float | None:
+    """Taxa mensal equivalente à anual (12 pagamentos iguais)."""
+    return None if dy_ano is None else dy_ano / 12
+
+
+def _selo_ir(r: Resultado) -> str:
+    if r.extras.get("isento", True):
+        return '<span class="ir isento">ISENTO DE IR</span>'
+    return f'<span class="ir trib">TEM IR · JCP {pct(r.extras.get("ir_jcp"), 1)}</span>'
+
+
+def _conta_ir(r: Resultado) -> str:
+    """Linha com o que cai na conta: sempre o líquido; se tiver IR, a conta bruto − IR = líquido."""
+    liq = r.dy12
+    if liq is None:
+        return ""
+    if r.extras.get("isento", True):
+        motivo = ("rendimento de FII é isento para pessoa física" if r.classe == "FII"
+                  else "só dividendos, sem JCP")
+        return (f'<div class="conta ok"><b>Líquido: {pct(liq)} ao ano · {pct(_mes(liq), 2)} ao mês</b>'
+                f'<span>Isento — {motivo}. O que aparece é o que cai na conta.</span></div>')
+    bruto = r.extras.get("dy_bruto") or liq
+    ir = bruto - liq
+    jcp = r.extras.get("jcp_frac") or 0
+    return (f'<div class="conta trib"><b>Líquido: {pct(liq)} ao ano · {pct(_mes(liq), 2)} ao mês</b>'
+            f'<span>Bruto {pct(bruto)} − IR {dec(ir * 100, 1)} p.p. = líquido {pct(liq)} ao ano '
+            f'({pct(_mes(bruto), 2)} − {dec(ir * 100 / 12, 2)} p.p. = {pct(_mes(liq), 2)} ao mês). '
+            f'{pct(jcp, 0)} dos proventos vieram como JCP, com {pct(r.extras.get("ir_jcp"), 1)} de IR retido '
+            f'na fonte no próprio pagamento; dividendos são isentos.</span></div>')
 
 
 def _tags(r: Resultado, listas: list[str], atual: str | None) -> str:
@@ -61,7 +93,7 @@ def _card(s: Sugestao, rank: int, cat: str, mapa: dict) -> str:
         _metrica("Preço", brl(r.preco)),
         _metrica("Teto Barsi", brl(r.teto)),
         _metrica("Margem", pct(r.margem, 0, True), _sinal(r.margem)),
-        _metrica("DY 12m", pct(r.dy12)),
+        _metrica("DY líquido 12m", pct(r.dy12), "pos", f"{pct(_mes(r.dy12), 2)} ao mês"),
         quinta,
         _metrica("Queda 52s", pct(r.queda52, 0), "neg" if (r.queda52 or 0) < -0.10 else ""),
     ])
@@ -77,10 +109,11 @@ def _card(s: Sugestao, rank: int, cat: str, mapa: dict) -> str:
     return f"""<article class="card">
   <div class="card-h">
     <span class="rank c-{COR[cat]}">{rank}</span>
-    <div class="id"><div class="tk">{_e(r.ticker)}</div><div class="nm">{_e(r.nome.title()[:44])}</div></div>
+    <div class="id"><div class="tk">{_e(r.ticker)} {_selo_ir(r)}</div><div class="nm">{_e(r.nome.title()[:44])}</div></div>
     <div class="nota"><b>{dec(s.nota, 0)}</b><span>nota</span><i style="--w:{s.nota:.0f}%" class="c-{COR[cat]}"></i></div>
   </div>
   <div class="tags">{_tags(r, mapa.get(r.ticker, []), cat)}</div>
+  {_conta_ir(r)}
   <div class="mgrid">{metricas}</div>
   <ul class="why">{motivos}</ul>
   {alertas}
@@ -165,8 +198,8 @@ def _visao_geral(sug: dict, mapa: dict, kpis: str, compra: list[Sugestao] | None
         titulo, sub, _ = CATEGORIAS[cat]
         linhas = "".join(
             f'<a class="mini" href="#{cat}"><span class="rank sm c-{COR[cat]}">{i}</span>'
-            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · DY {pct(s.r.dy12)} · '
-            f'margem {pct(s.r.margem, 0, True)}</span><em>{dec(s.nota, 0)}</em></a>'
+            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · DY líq. {pct(s.r.dy12)} · '
+            f'{"isento" if s.r.extras.get("isento", True) else "tem IR"}</span><em>{dec(s.nota, 0)}</em></a>'
             for i, s in enumerate(itens[:5], 1)) or '<div class="mut pad">Sem sugestões hoje.</div>'
         paineis.append(f"""<div class="panel b-{COR[cat]}">
   <div class="panel-h"><div><div class="eyebrow">{_e(sub)}</div><h3>{_e(titulo)}</h3></div>
@@ -175,8 +208,9 @@ def _visao_geral(sug: dict, mapa: dict, kpis: str, compra: list[Sugestao] | None
     if compra:
         linhas = "".join(
             f'<a class="mini" href="#compra"><span class="rank sm c-cmp">{i}</span>'
-            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · {_e(s.r.tipo)} · DY {pct(s.r.dy12)} · '
-            f'margem {pct(s.r.margem, 0, True)}</span><em>{dec(s.nota, 0)}</em></a>'
+            f'<b>{_e(s.r.ticker)}</b><span class="mut">{_e(s.r.classe)} · {_e(s.r.tipo)} · DY líq. {pct(s.r.dy12)} '
+            f'({pct(_mes(s.r.dy12), 2)}/mês) · {"isento" if s.r.extras.get("isento", True) else "tem IR"}'
+            f'</span><em>{dec(s.nota, 0)}</em></a>'
             for i, s in enumerate(compra[:10], 1))
         destaque = f"""<div class="panel b-cmp topo">
   <div class="panel-h"><div><div class="eyebrow">Só compra · foco em dividendos</div><h3>Ranking de compra — top 10</h3></div>
@@ -205,7 +239,10 @@ def _radar(resultados: list[Resultado], mapa: dict) -> str:
             f'<td>{_e(r.classe)}</td><td>{_e(r.tipo)}</td>'
             + _td(brl(r.preco), r.preco) + _td(brl(r.teto), r.teto)
             + _td(pct(r.margem, 0, True), r.margem, _sinal(r.margem))
-            + _td(pct(r.dy12), r.dy12) + _td(pct(r.dy_medio), r.dy_medio)
+            + _td(f'<b class="pos">{pct(r.dy12)}</b>', r.dy12) + _td(pct(_mes(r.dy12), 2), _mes(r.dy12))
+            + f'<td>{_selo_ir(r)}</td>'
+            + _td(pct(r.extras.get("dy_bruto") or r.dy12), r.extras.get("dy_bruto") or r.dy12)
+            + _td(pct(r.dy_medio), r.dy_medio)
             + _td(dec(r.pvp), r.pvp) + _td(pct(r.extras.get("roe")), r.extras.get("roe"))
             + _td(pct(r.queda52, 0), r.queda52)
             + _td(f"{dec(r.queda_rel * 100, 0)} p.p." if r.queda_rel is not None else "—", r.queda_rel)
@@ -213,7 +250,8 @@ def _radar(resultados: list[Resultado], mapa: dict) -> str:
             + _td(pct(r.cresc_dpa, 1, True), r.cresc_dpa, _sinal(r.cresc_dpa))
             + _td(f'<span class="score">{dec(r.score, 0)}</span>', r.score)
             + f"<td>{listas}</td></tr>")
-    cab = ["Ativo", "Classe", "Tipo", "Preço", "Teto", "Margem", "DY 12m", "DY médio", "P/VP", "ROE",
+    cab = ["Ativo", "Classe", "Tipo", "Preço", "Teto", "Margem", "DY líquido", "Líquido/mês", "IR", "DY bruto",
+           "DY médio", "P/VP", "ROE",
            "Queda 52s", "vs índice", "Renda vs média", "Cresc. proventos", "Score", "Listas"]
     ths = "".join(f"<th>{c}</th>" for c in cab)
     return f"""<section class="page" id="p-radar" hidden>
@@ -248,7 +286,7 @@ def _descartes(resultados: list[Resultado]) -> str:
         linhas.append(
             f"<tr><td><b>{_e(r.ticker)}</b><div class='sub'>{_e(r.nome.title()[:34])}</div></td>"
             f"<td>{_e(r.classe)}</td><td><span class='pill {cls}'>{rot}</span></td>"
-            f"<td class='n'>{pct(r.dy12)}</td><td class='n'>{pct(r.queda52, 0)}</td>"
+            f"<td class='n'>{pct(r.dy12)} {_selo_ir(r)}</td><td class='n'>{pct(r.queda52, 0)}</td>"
             f"<td class='mot'>{'<br>'.join(_e(m) for m in motivos)}</td></tr>")
     return f"""<section class="page" id="p-furadas" hidden>
 <div class="hero h-neg"><div><div class="eyebrow">3º Axioma de Zurique</div><h2>Furadas e descartes</h2>
@@ -256,7 +294,7 @@ def _descartes(resultados: list[Resultado]) -> str:
 prejuízo, payout insustentável, dívida ou vacância altas, corte recente ou preço acima do teto. Nenhum deles entra em lista
 de sugestão. Fundos de papel, de fundos e híbridos nem entram na análise.</p></div>
 <div class="hero-n"><b>{len(furadas)}</b><span>barrados</span></div></div>
-<div class="panel"><div class="tw"><table><thead><tr><th>Ativo</th><th>Classe</th><th>Situação</th><th>DY 12m</th>
+<div class="panel"><div class="tw"><table><thead><tr><th>Ativo</th><th>Classe</th><th>Situação</th><th>DY líquido</th>
 <th>Queda 52s</th><th>Motivo</th></tr></thead><tbody>{''.join(linhas)}</tbody></table></div></div></section>"""
 
 
@@ -336,7 +374,14 @@ border:1px solid var(--ln);border-left:5px solid var(--neu);border-radius:12px;p
 .t-deb{color:var(--deb)}.t-jur{color:var(--jur)}.t-div{color:var(--div)}.t-lon{color:var(--lon)}
 .mgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--ln);border:1px solid var(--ln);border-radius:9px;overflow:hidden}
 .m{background:var(--panel2);padding:7px 10px}.m span{display:block;font-size:11px;color:var(--mut)}
-.m b{font-size:14.5px;font-variant-numeric:tabular-nums}
+.m b{font-size:14.5px;font-variant-numeric:tabular-nums}.m small{display:block;font-size:11px;color:var(--mut)}
+.ir{display:inline-block;vertical-align:middle;font-size:10.5px;font-weight:700;letter-spacing:.04em;border-radius:5px;padding:2px 7px;margin-left:6px;white-space:nowrap}
+.ir.isento{background:color-mix(in srgb,var(--pos) 16%,transparent);color:var(--pos);border:1px solid color-mix(in srgb,var(--pos) 45%,transparent)}
+.ir.trib{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)}
+.conta{border-radius:9px;padding:8px 11px;font-size:12.5px;display:grid;gap:2px}
+.conta b{font-size:14px}.conta span{color:var(--mut)}
+.conta.ok{background:color-mix(in srgb,var(--pos) 9%,transparent);border-left:3px solid var(--pos)}
+.conta.trib{background:color-mix(in srgb,var(--warn) 10%,transparent);border-left:3px solid var(--warn)}
 .why{margin:0;padding-left:18px;font-size:13px}.why li{margin:2px 0}
 .alerta{font-size:12px;color:var(--warn);background:color-mix(in srgb,var(--warn) 10%,transparent);border-radius:7px;padding:5px 9px}
 .lnk{display:flex;gap:14px;font-size:12px;margin-top:auto;padding-top:8px;border-top:1px solid var(--ln)}
@@ -444,7 +489,7 @@ def gerar_html(resultados: list[Resultado], sug: dict[str, list[Sugestao]], cont
 <footer><div class="panel"><b>Como o motor decide</b><ul>
 <li><b>Escopo</b>: só ativos físicos — FIIs de tijolo (pelo menos 67% do investido em imóveis, pelo informe da CVM) e ações de Bancos, Energia, Saneamento, Seguros e Telecom (classificação oficial da B3). Fundos de papel, de fundos e híbridos não entram.</li>
 <li><b>Limpo</b> = liquidez, lucro, histórico completo de proventos, renda de 12m ≥ 80% da média de 3 anos, sem alerta grave (payout &gt; 100%, DY &gt; 25%, vacância alta, dívida alta, corte recente) e preço abaixo do teto.</li>
-<li><b>DY líquido</b>: proventos de 12 meses ÷ preço, com o IR do JCP já descontado. Rendimento de FII é isento para pessoa física; amortização de cotas não conta como renda.</li>
+<li><b>DY líquido</b> (o que cai na conta): proventos de 12 meses ÷ preço, já sem o IR. <b>Isento</b>: rendimento de FII e dividendo de ação. <b>Tem IR</b>: JCP, com 17,5% retido na fonte no próprio pagamento (LC 224/2025, desde 01/01/2026) — o card mostra a conta bruto − IR = líquido. Proventos não têm tabela regressiva (ela é da renda fixa). Amortização de cotas não conta como renda.</li>
 <li><b>Teto Barsi</b> = menor entre proventos de 12m e média de 3 anos ÷ yield exigido. Ações: 6% (Barsi). FII de tijolo: o maior entre 8% e o juro real esperado pelo Focus + 1 p.p. No FII, se a renda recorrente da CVM (sem ganho com venda de imóveis) cobrir menos de 90% do distribuído, o teto usa a recorrente.</li>
 <li><b>Dívida</b>: FII com securitização + compras a prazo acima de 20% do ativo e empresa com dívida líquida acima de 3x o EBITDA perdem nota; acima de 40% / 4x, saem das listas.</li>
 <li><b>Nota</b> 0–100 é específica de cada lista; serve para ordenar, não para comparar listas entre si.</li>
@@ -473,7 +518,8 @@ CAMPOS_CSV = [
     ("Cresc. proventos 3a", "cresc_dpa"), ("Liquidez", "liquidez"), ("Renda/mês R$1k", "renda_mil"),
     ("Score", "score"),
 ]
-EXTRAS_CSV = [("Yield exigido", "yield_alvo"), ("FII: % em imóveis", "fisico"),
+EXTRAS_CSV = [("Isento de IR", "isento"), ("DY 12m bruto (antes do IR)", "dy_bruto"),
+              ("Yield exigido", "yield_alvo"), ("FII: % em imóveis", "fisico"),
               ("FII: renda recorrente/cota 12m", "recorrente"), ("FII: cobertura recorrente", "cobertura"),
               ("FII: ganho com vendas/cota 12m", "ganhos_venda"), ("FII: dívida/ativo", "alavancagem"),
               ("FII: vacância", "vacancia"), ("FII: receita vencendo 12m", "venc_12m"),
@@ -514,14 +560,14 @@ def resumo_terminal(sug: dict[str, list[Sugestao]], compra: list[Sugestao] | Non
             r = s.r
             p = " ".join(f"{k[:3]} {dec(v, 0)}" for k, (v, _) in s.partes.items())
             linhas.append(f"  {i:>2}. {r.ticker:<7} {r.classe:<4} {r.tipo[:12]:<12} {brl(r.preco):>11}  "
-                          f"DY {pct(r.dy12):>6}  margem {pct(r.margem, 0, True):>6}  nota {dec(s.nota, 0):>3}  [{p}]")
+                          f"DY líq {pct(r.dy12):>6}  margem {pct(r.margem, 0, True):>6}  nota {dec(s.nota, 0):>3}  [{p}]")
         if not compra:
             linhas.append("  (nenhum ativo atende hoje)")
     for cat, itens in sug.items():
         linhas.append(f"\n{CATEGORIAS[cat][0].upper()} — {CATEGORIAS[cat][1]} ({len(itens)})")
         for i, s in enumerate(itens[:5], 1):
             r = s.r
-            linhas.append(f"  {i}. {r.ticker:<7} {r.classe:<4} {brl(r.preco):>11}  DY {pct(r.dy12):>6}  "
+            linhas.append(f"  {i}. {r.ticker:<7} {r.classe:<4} {brl(r.preco):>11}  DY líq {pct(r.dy12):>6}  "
                           f"margem {pct(r.margem, 0, True):>6}  nota {dec(s.nota, 0)}")
         if not itens:
             linhas.append("  (nenhum ativo atende hoje)")
