@@ -1,152 +1,116 @@
 # =============================================================================
 #  Motor de Oportunidades — Barsi + Axiomas de Zurique + Kiyosaki
-#  Edite os valores para ajustar as regras. Percentuais em decimal (0.06 = 6%).
+#  Só ativos físicos: FIIs de TIJOLO e ações de empresas BESST.
+#  Fontes oficiais: B3 (cotações e proventos), CVM (informes e balanços), Banco Central.
+#  Percentuais em decimal (0.06 = 6%).
 # =============================================================================
 
 [geral]
 anos_media_proventos = 3      # média de proventos usada no preço teto (Barsi)
-workers = 4                   # downloads simultâneos de histórico
+anos_cotacao = 2              # anos completos de cotação B3 além do ano corrente
+ir_jcp = 0.15                 # IR retido na fonte sobre JCP (confira a alíquota vigente)
+workers = 4                   # consultas simultâneas à B3
 pasta_relatorios = "relatorios"
-pasta_cache = "cache"         # dados brutos do dia (rodar de novo no mesmo dia é instantâneo)
+pasta_cache = "cache"
 
 # -----------------------------------------------------------------------------
 [acoes]
-# Setores do Fundamentus (resultado.php?setor=N). Padrão: BESST.
-# Para incluir outro setor perene, acrescente a linha, ex.:  "21" = "Papel e Celulose"
-setores = { "20" = "Bancos", "14" = "Energia Elétrica", "2" = "Saneamento", "31" = "Seguros", "40" = "Telecomunicações" }
-setores_financeiros = ["20", "31"]   # nesses, a dívida líquida/PL não se aplica
+# Setores pela classificação oficial da B3 (início do texto "Setor / Subsetor / Segmento").
+setores = { "Financeiro / Intermediários Financeiros / Bancos" = "Bancos", "Utilidade Pública / Energia Elétrica" = "Energia Elétrica", "Utilidade Pública / Água e Saneamento" = "Saneamento", "Financeiro / Previdência e Seguros" = "Seguros", "Comunicações / Telecomunicações" = "Telecomunicações" }
+setores_financeiros = ["Bancos", "Seguros"]   # nesses, dívida/EBITDA não se aplica
 
-yield_minimo = 0.06                  # Barsi: preço teto = DPA / 6%
+yield_minimo = 0.06                  # Barsi: preço teto = proventos líquidos / 6%
+# premio_sobre_juro_real = 0.0       # descomente para exigir das ações o juro real esperado + prêmio
 liquidez_minima = 2_000_000          # volume médio diário em R$
-dy_pre_filtro = 0.04                 # DY mínimo (Fundamentus) para valer baixar o histórico
 roe_minimo = 0.08
-divida_liq_pl_maxima = 2.5
 anos_minimos_com_proventos = 4       # dos últimos 5 anos
 payout_maximo = 1.0                  # paga mais de 100% do lucro = dividendo insustentável
-# Dívida líquida/EBITDA (só setores não financeiros), da página de detalhes do Fundamentus
 divida_liq_ebitda_alerta = 3.0       # acima: alerta e perde nota nas listas
 divida_liq_ebitda_maxima = 4.0       # acima: alerta grave (fora das listas)
 
 # -----------------------------------------------------------------------------
 [fiis]
-# Segmentos do Fundamentus aceitos. Fora daqui: Shoppings, Escritórios, Lajes,
-# Hospital, Hotel, Residencial (ciclos/vacância voláteis).
-segmentos_permitidos = ["Logística", "Títulos e Val. Mob.", "Multicategoria", "Híbrido", "Varejo", "Outros"]
-segmentos_genericos  = ["Multicategoria", "Híbrido", "Outros"]   # gera alerta: confira o portfólio
-# O Fundamentus classifica mal muitos fundos ("Multicategoria"). Se o NOME tiver
-# uma destas palavras, o fundo é descartado (escritórios, shoppings, hotéis...).
+# Tijolo = pelo menos esta fração do total investido em imóveis físicos (direto ou via SPE),
+# pelo informe mensal da CVM. Fundos de CRI, de fundos ou híbridos ficam fora.
+tijolo_fisico_minimo = 0.67
+# Segmentos da CVM fora do escopo perene (ciclos e vacância voláteis):
+segmentos_excluidos = ["Escritórios", "Shoppings", "Hospital", "Hotel", "Residencial", "Educacional"]
+# A CVM classifica muitos fundos como "Multicategoria": se o NOME tiver um destes termos, sai.
 palavras_excluidas = ["OFFICE", "CORPORATE", "LAJE", "ESCRITÓRIO", "ESCRITORIO", "SHOPPING", "MALL",
                       "HOTEL", "HOSPITAL", "RESIDENCIAL", "EDUCACIONAL", "AGÊNCIA", "AGENCIAS"]
 
-yield_minimo_tijolo = 0.08           # teto = rendimento anual / 8%
-yield_minimo_papel  = 0.10           # papel não tem imóvel físico: exige mais renda
+# Teto = proventos / yield exigido. Yield exigido = o MAIOR entre o piso e o juro real esperado
+# (Focus: Selic ÷ IPCA do próximo ano) + prêmio. O aluguel é corrigido pela inflação, então o
+# FII compete com o juro real; com juros altos o teto fica mais exigente sozinho.
+yield_minimo_tijolo = 0.08
+premio_sobre_juro_real = 0.01
 liquidez_minima = 1_000_000          # volume médio diário em R$
-dy_pre_filtro = 0.06
 pvp_maximo = 1.05                    # acima disso = vitrine (pagando caro pelo patrimônio)
-pvp_minimo_papel = 0.70              # papel abaixo disso = mercado precificando calote
-vacancia_maxima = 0.15
+pvp_minimo_suspeito = 0.50           # abaixo: alerta para conferir o laudo dos imóveis
+vacancia_maxima = 0.15               # vacância ponderada pela receita (CVM)
 meses_minimos_com_rendimento = 10    # dos últimos 12
 anos_minimos_historico = 2
 
-# Teto recorrente: no tijolo, o teto usa o MENOR entre proventos pagos e FFO/cota de 12m.
-# Assim lucro com venda de imóvel (não recorrente) não estica o teto (caso TRXF11).
-teto_pelo_ffo = true
-
-# Alavancagem = (Ativos - Patrimônio Líquido) / PL, da página de detalhes do Fundamentus.
-# Capta obrigações por aquisição de imóveis, CRIs emitidos e compromissadas.
+# Renda recorrente = resultado de caixa dos últimos 4 trimestres (CVM) menos ganhos com venda
+# de imóveis e títulos. Se cobrir menos que isto dos proventos pagos, o teto passa a usar ela.
+cobertura_recorrente_minima = 0.90
+# Dívida = securitização + compras de imóveis a prazo, sobre o ativo total (informe mensal CVM).
 alavancagem_alerta = 0.20            # acima: alerta e perde nota nas listas
-alavancagem_maxima = 0.50            # acima: alerta grave (fora das listas)
+alavancagem_maxima = 0.40            # acima: alerta grave (fora das listas)
+contratos_venc_12m_alerta = 0.30     # fração da receita com contrato vencendo em 12 meses
 
-# Tipo do FII pela fração do PL em imóveis físicos ("Imóveis/PL do FII" no Fundamentus).
-# O segmento "Multicategoria" mistura fundos de CRI e de tijolo; este número separa.
-tipo_papel_imoveis_pl_max  = 0.10    # abaixo: Papel (CRIs/recebíveis)
-tipo_tijolo_imoveis_pl_min = 0.50    # a partir daqui: Tijolo; entre os dois: Híbrido
-yield_minimo_hibrido = 0.09          # teto do híbrido = rendimento anual / 9%
-yield_minimo_fof     = 0.10          # FoF: só vale se excluir_fof = false
-excluir_fof = true                   # fundos de fundos (FoF) ficam fora: reconhecidos pelo nome
-                                     # ou por tipo = "FoF" em [fiis.manual]
-# Multiestratégia / "hedge fund" imobiliário: misturam cotas de FII, CRIs e imóveis a
-# critério do gestor. Se o NOME tiver um destes termos, o fundo é descartado.
-nomes_multiestrategia = ["HEDGE FUND", "MULTIESTRAT", "MULTI ESTRAT"]
-excluir_hibrido = true               # true: só entram tijolo puro e papel puro
-# Papel: o FFO do Fundamentus fica 10-25% abaixo do distribuído mesmo em bons fundos, então
-# não limita o teto. Abaixo desta cobertura (FFO/cota ÷ proventos), alerta e sai de Dividendos.
-papel_ffo_cobertura_minima = 0.60
-
-# -----------------------------------------------------------------------------
 [fiis.manual]
-# Correções manuais, valem sobre tudo acima. Campos opcionais:
-#   tipo     = "Tijolo" | "Papel" | "Híbrido" | "FoF"
-#   segmento = rótulo exibido no painel (o filtro de escopo continua usando o do Fundamentus)
-#   excluir  = true, motivo = "..."   -> tira o fundo da análise (vai para Furadas)
+# Correções manuais, valem sobre tudo acima:
+#   segmento = rótulo exibido no painel     excluir = true, motivo = "..."
 RZTR11 = { segmento = "Terras agrícolas" }
-TRXF11 = { segmento = "Renda urbana / varejo" }
+TRXF11 = { segmento = "Renda urbana / logística" }
 GGRC11 = { segmento = "Logística / industrial" }
-# Sugestões A CONFERIR — tire o '#' só depois de checar o relatório gerencial:
-# RBRL11 = { tipo = "Tijolo", segmento = "Logística" }   # Fundamentus mostra 0 imóveis (via SPE/cotas?)
-# TGAR11 = { tipo = "Híbrido" }                          # CRIs + participação em loteamentos (SPEs)
-# SNEL11 = { tipo = "Híbrido", segmento = "Energia" }    # usinas solares, não é crédito imobiliário
+# Fundos de lajes corporativas que a CVM classifica como "Multicategoria" (escritórios = fora do
+# escopo perene). Apague a linha se discordar.
+BRCR11 = { excluir = true, motivo = "lajes corporativas (escritórios)" }
+JSRE11 = { excluir = true, motivo = "lajes corporativas (escritórios)" }
+RBRP11 = { excluir = true, motivo = "lajes corporativas (escritórios)" }
+TEPP11 = { excluir = true, motivo = "lajes corporativas (escritórios)" }
 
 # -----------------------------------------------------------------------------
 [sinais]
-# O que caracteriza "bom ativo descontado pela debandada do mercado".
 # OPORTUNIDADE exige TODOS: abaixo do teto + queda relativa + DY expandido
-# (+ P/VP descontado, no caso de FII) e nenhum alerta grave.
-# Quem só caiu junto com o mercado vai para OBSERVAR.
-indice_fiis  = "XFIX11"       # ETF do IFIX: régua para FIIs
-indice_acoes = "BOVA11"       # ETF do Ibovespa: régua para ações
-queda_relativa_minima = 0.10  # caiu 10+ p.p. a mais que o índice em 52 semanas (debandada específica)
+# (+ P/VP descontado, no FII) e nenhum alerta grave. Quem só caiu junto com o mercado: OBSERVAR.
+indice_fiis  = "XFIX11"       # ETF do IFIX (cotação B3): régua para FIIs
+indice_acoes = "BOVA11"       # ETF do Ibovespa (cotação B3): régua para ações
+queda_relativa_minima = 0.10  # caiu 10+ p.p. a mais que o índice em 52 semanas
 queda_52s_minima   = 0.15     # usado só se o índice não estiver disponível
 expansao_dy_minima = 0.15     # DY atual 15%+ acima do DY médio histórico
 pvp_desconto       = 0.90     # FII a 0,90x o VP ou menos
 margem_minima      = 0.00     # preço precisa estar abaixo do teto
-
-# Ruído x estrutural: se os proventos caíram JUNTO com a cota, não é debandada,
-# é o mercado precificando um problema real (3º Axioma: corte, não reze).
-tendencia_proventos_minima = 0.80   # proventos 12m >= 80% da média de N anos
-
-dy_vs_ffo_alerta = 1.5        # tijolo distribuindo 1,5x o FFO: renda pode vir de venda de imóveis
-dy_suspeito      = 0.25       # DY > 25% = reprovado (insustentável / extraordinário)
+# Ruído x estrutural: se os proventos caíram JUNTO com a cota, é problema real (3º Axioma).
+tendencia_proventos_minima = 0.80
+dy_suspeito = 0.25            # DY > 25% = reprovado (insustentável / extraordinário)
 
 # -----------------------------------------------------------------------------
 [sugestoes]
-# Listas de sugestões. TODAS partem só dos ativos limpos: sem descarte, sem renda
-# caindo (estrutural), sem alerta grave e abaixo do preço teto.
-top = 10                                  # quantos ativos por lista
-
-# Queda de juros: quem mais se valoriza quando a Selic cai.
-# FIIs de papel CDI perdem renda com juros caindo, por isso ficam de fora.
+# TODAS as listas partem só dos ativos limpos: sem descarte, sem renda caindo,
+# sem alerta grave e abaixo do preço teto.
+top = 10
 setores_sensiveis_juros = ["Energia Elétrica", "Saneamento", "Telecomunicações"]
-juros_pvp_maximo = 0.95                   # tijolo com desconto patrimonial para fechar
-
-# Dividendos: maior renda HOJE, desde que estável e recorrente
-div_dy_minimo_acao = 0.08
-div_dy_minimo_fii = 0.11
-div_pvp_minimo_papel = 0.85               # papel muito descontado = crédito questionado
-div_tendencia_minima = 0.95               # proventos 12m >= 95% da média
-# FII de papel distribui a correção monetária do CDI/IPCA: gastar 100% da renda corrói o
-# principal. Na nota da lista, o papel entra pelo DY REAL (descontado o IPCA 12m) e o
-# híbrido desconta o IPCA só da parte do PL fora de imóveis; tijolo e ações entram pelo
-# DY nominal (imóvel e empresa corrigem com a inflação).
-div_papel_usa_dy_real = true
-
-# Longo prazo: acumular por anos (Barsi/Kiyosaki)
+juros_pvp_maximo = 0.95
+div_dy_minimo_acao = 0.08            # DY líquido (JCP já com IR descontado)
+div_dy_minimo_fii = 0.10
+div_tendencia_minima = 0.95
 longo_roe_minimo = 0.12
-longo_cresc_proventos_minimo = 0.0        # proventos não podem ter encolhido em 3 anos
+longo_cresc_proventos_minimo = 0.0
 longo_pvp_maximo_fii = 1.0
 longo_vacancia_maxima = 0.10
 
 # -----------------------------------------------------------------------------
 [compra]
-# Ranking de compra: só compra (sem sinal de venda), foco exclusivo em dividendos.
-# Parte dos ativos limpos e soma: Renda recorrente (35) + Estabilidade dos proventos (30)
-# + Qualidade e gestão (20) + Preço de entrada (15) − alertas leves.
+# Ranking de compra: só compra, foco em dividendos. Soma: Renda recorrente (35) +
+# Estabilidade dos proventos (30) + Qualidade (20) + Preço de entrada (15) − alertas leves.
 top = 15
-max_por_grupo = 4               # no máximo N por setor (ações) / segmento (tijolo) / papel
-tendencia_minima = 0.90         # proventos 12m >= 90% da média de 3 anos
-anos_minimos_historico = 3.0    # FII novo demais não entra
-papel_pvp_minimo = 0.85         # papel abaixo disso: mercado desconfia do crédito
+max_por_grupo = 4               # no máximo N por setor (ações) / segmento (FII)
+tendencia_minima = 0.90
+anos_minimos_historico = 3.0
 acao_roe_minimo = 0.10
-acao_payout_maximo = 0.90       # acima disso sobra pouco lucro para manter o dividendo...
-acao_roe_alto = 0.25            # ...exceto com ROE acima disto (negócio que não precisa reinvestir, ex. BBSE3)
-penalidade_alerta = 4           # pontos por alerta leve não pontuado em outro bloco
+acao_payout_maximo = 0.90
+acao_roe_alto = 0.25            # payout alto só é aceito com ROE acima disto (ex.: BBSE3)
+penalidade_alerta = 4

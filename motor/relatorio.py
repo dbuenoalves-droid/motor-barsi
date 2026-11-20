@@ -17,11 +17,17 @@ def _e(v) -> str:
 
 
 def _links(r: Resultado) -> str:
+    """Só links oficiais (documentos na B3/CVM) e uma busca de notícias para checar o motivo da queda."""
     t = r.ticker
-    base = "fiis" if r.classe == "FII" else "acoes"
-    return (f'<a href="https://statusinvest.com.br/{base}/{t.lower()}" target="_blank">Status Invest</a>'
-            f'<a href="https://www.fundamentus.com.br/detalhes.php?papel={t}" target="_blank">Fundamentus</a>'
-            f'<a href="https://news.google.com/search?q={t}&hl=pt-BR" target="_blank">Notícias</a>')
+    if r.classe == "FII":
+        cnpj = "".join(ch for ch in (r.extras.get("cnpj") or "") if ch.isdigit())
+        doc = (f'<a href="https://fnet.bmfbovespa.com.br/fnet/publico/abrirGerenciadorDocumentosCVM?cnpjFundo={cnpj}" '
+               f'target="_blank">Relatórios (B3 FundosNET)</a>' if cnpj else "")
+    else:
+        cod = r.extras.get("code_cvm")
+        doc = (f'<a href="https://sistemaswebb3-listados.b3.com.br/listedCompaniesPage/main/{cod}/{t[:4]}/overview?language=pt-br" '
+               f'target="_blank">Empresa na B3</a>' if cod else "")
+    return doc + f'<a href="https://news.google.com/search?q={t}&hl=pt-BR" target="_blank">Notícias</a>'
 
 
 def _sinal(v: float | None, bom_positivo: bool = True) -> str:
@@ -139,9 +145,9 @@ def _pagina_compra(compra: list[Sugestao], fora: list[Sugestao], contexto: dict,
         nota_fora = (f'<div class="panel mut">Fora pelo limite de {max_grupo} por setor/segmento '
                      f'(para não concentrar a carteira): {_e(nomes)}</div>')
     info = (f'<div class="panel"><b>Composição:</b> {_e(_composicao(compra))}. '
-            '<span class="mut">Nota = Renda recorrente (35) + Estabilidade dos proventos (30) + '
-            'Qualidade e gestão (20) + Preço de entrada (15) − alertas. "Gestão" é medida por números '
-            '(ROE, payout, dívida, vacância, alavancagem, confiança no crédito) — o motor não avalia o gestor '
+            '<span class="mut">Nota = Renda recorrente líquida (35) + Estabilidade dos proventos (30) + '
+            'Qualidade (20) + Preço de entrada (15) − alertas. Qualidade é medida por números oficiais da CVM '
+            '(ROE, payout, dívida, vacância, prazo dos contratos) — o motor não avalia o gestor '
             'em si: leia o relatório gerencial antes de comprar.</span></div>')
     return (f'<section class="page" id="p-compra" hidden>{_cabecalho_categoria("compra", contexto, len(compra))}'
             f'{info}{corpo}{nota_fora}</section>')
@@ -244,8 +250,9 @@ def _descartes(resultados: list[Resultado]) -> str:
             f"<td class='mot'>{'<br>'.join(_e(m) for m in motivos)}</td></tr>")
     return f"""<section class="page" id="p-furadas" hidden>
 <div class="hero h-neg"><div><div class="eyebrow">3º Axioma de Zurique</div><h2>Furadas e descartes</h2>
-<p>Ativos que chegaram à análise mas foram barrados: renda caindo junto com a cota, prejuízo, payout insustentável,
-crédito questionado, segmento fora do escopo ou preço acima do teto. Nenhum deles entra em lista de sugestão.</p></div>
+<p>FIIs de tijolo e ações BESST que chegaram à análise mas foram barrados: renda caindo junto com a cota,
+prejuízo, payout insustentável, dívida ou vacância altas, corte recente ou preço acima do teto. Nenhum deles entra em lista
+de sugestão. Fundos de papel, de fundos e híbridos nem entram na análise.</p></div>
 <div class="hero-n"><b>{len(furadas)}</b><span>barrados</span></div></div>
 <div class="panel"><div class="tw"><table><thead><tr><th>Ativo</th><th>Classe</th><th>Situação</th><th>DY 12m</th>
 <th>Queda 52s</th><th>Motivo</th></tr></thead><tbody>{''.join(linhas)}</tbody></table></div></div></section>"""
@@ -391,8 +398,13 @@ def _faixa_contexto(contexto: dict) -> str:
         itens.append(f'<div><span>Focus {ano}</span><b>{pct(v, 2)}</b></div>')
     if contexto.get("ipca"):
         itens.append(f'<div><span>IPCA 12m</span><b>{pct(contexto["ipca"][0], 2)}</b></div>')
+    if contexto.get("juro_real") is not None:
+        itens.append(f'<div><span>Juro real esperado {contexto.get("juro_real_ano", "")}</span>'
+                     f'<b>{pct(contexto["juro_real"], 2)}</b></div>')
     for nome, q in contexto.get("indices", []):
         itens.append(f'<div><span>{_e(nome)}</span><b class="{"up" if q < 0 else "dn"}">{pct(q, 0)}</b></div>')
+    if contexto.get("cotacoes_ate"):
+        itens.append(f'<div><span>Cotações B3 até</span><b>{_e(contexto["cotacoes_ate"])}</b></div>')
     return "".join(itens)
 
 
@@ -428,14 +440,14 @@ def gerar_html(resultados: list[Resultado], sug: dict[str, list[Sugestao]], cont
 </div><div class="ctx"><div class="ctx-in">{_faixa_contexto(contexto)}</div></div></header>
 <main>{''.join(paginas)}</main>
 <footer><div class="panel"><b>Como o motor decide</b><ul>
-<li><b>Limpo</b> = setor perene, liquidez, lucro, histórico completo de proventos, renda de 12m ≥ 80% da média de 3 anos, sem alerta grave (payout &gt; 100%, DY &gt; 25%, vacância alta, alavancagem alta, crédito questionado, corte recente) e preço abaixo do teto.</li>
-<li><b>Teto Barsi</b> = menor entre proventos de 12m e média de 3 anos ÷ yield mínimo (ações 6%, FII tijolo 8%, híbrido 9%, papel 10%). Fundos de fundos (FoF) ficam fora. No tijolo e no híbrido, limitado ao FFO/cota: renda de venda de imóvel não estica o teto.</li>
-<li><b>Balanço</b>: FII com passivo acima de 20% do PL e empresa com dívida líquida acima de 3x o EBITDA perdem nota; acima de 50% / 4x, saem das listas.</li>
-<li><b>Tipo do FII</b> pela fração do PL em imóveis físicos: abaixo de 10% = Papel, de 10% a 50% = Híbrido, acima = Tijolo (correções manuais em <code>config.toml</code>).</li>
-<li><b>FII de papel e híbrido</b> na lista de Dividendos são ordenados pelo DY real (descontado o IPCA da parte em crédito), porque a correção monetária distribuída repõe o principal.</li>
+<li><b>Escopo</b>: só ativos físicos — FIIs de tijolo (pelo menos 67% do investido em imóveis, pelo informe da CVM) e ações de Bancos, Energia, Saneamento, Seguros e Telecom (classificação oficial da B3). Fundos de papel, de fundos e híbridos não entram.</li>
+<li><b>Limpo</b> = liquidez, lucro, histórico completo de proventos, renda de 12m ≥ 80% da média de 3 anos, sem alerta grave (payout &gt; 100%, DY &gt; 25%, vacância alta, dívida alta, corte recente) e preço abaixo do teto.</li>
+<li><b>DY líquido</b>: proventos de 12 meses ÷ preço, com o IR do JCP já descontado. Rendimento de FII é isento para pessoa física; amortização de cotas não conta como renda.</li>
+<li><b>Teto Barsi</b> = menor entre proventos de 12m e média de 3 anos ÷ yield exigido. Ações: 6% (Barsi). FII de tijolo: o maior entre 8% e o juro real esperado pelo Focus + 1 p.p. No FII, se a renda recorrente da CVM (sem ganho com venda de imóveis) cobrir menos de 90% do distribuído, o teto usa a recorrente.</li>
+<li><b>Dívida</b>: FII com securitização + compras a prazo acima de 20% do ativo e empresa com dívida líquida acima de 3x o EBITDA perdem nota; acima de 40% / 4x, saem das listas.</li>
 <li><b>Nota</b> 0–100 é específica de cada lista; serve para ordenar, não para comparar listas entre si.</li>
 <li>O motor não lê notícias nem relatórios gerenciais: use os links de cada card para confirmar o motivo da queda antes de decidir.</li>
-<li>Fontes: Fundamentus, Yahoo Finance, Banco Central (Selic, IPCA, Focus). Regras ajustáveis em <code>config.toml</code>.</li>
+<li><b>Fontes, só as primárias</b>: B3 (cotações oficiais, proventos, desdobramentos, classificação setorial), CVM (informes mensais e trimestrais dos FIIs, balanços ITR/DFP das empresas) e Banco Central (Selic, IPCA, Focus). Regras ajustáveis em <code>config.toml</code>.</li>
 </ul></div></footer>
 <script>{JS}</script>"""
     local = (f'<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">'
@@ -452,17 +464,20 @@ def gerar_html(resultados: list[Resultado], sug: dict[str, list[Sugestao]], cont
 CAMPOS_CSV = [
     ("Status", "status"), ("Classe", "classe"), ("Ticker", "ticker"), ("Nome", "nome"),
     ("Segmento", "segmento"), ("Tipo", "tipo"), ("Preço", "preco"), ("Teto", "teto"),
-    ("Teto bruto (sem limite FFO)", "teto_bruto"),
-    ("Margem", "margem"), ("DPA 12m", "dpa12"), ("DPA média", "dpa_media"), ("DY 12m", "dy12"),
+    ("Teto pelos proventos pagos", "teto_bruto"),
+    ("Margem", "margem"), ("DPA 12m líquido", "dpa12"), ("DPA média", "dpa_media"), ("DY 12m líquido", "dy12"),
     ("DY médio", "dy_medio"), ("Expansão DY", "expansao_dy"), ("Queda 52s", "queda52"),
     ("Queda vs índice", "queda_rel"), ("P/VP", "pvp"), ("Renda vs média", "tendencia"),
     ("Cresc. proventos 3a", "cresc_dpa"), ("Liquidez", "liquidez"), ("Renda/mês R$1k", "renda_mil"),
     ("Score", "score"),
 ]
-EXTRAS_CSV = [("Imóveis/PL", "imoveis_pl"), ("Origem do tipo", "tipo_origem"),
-              ("FFO/cota", "ffo_cota"), ("Cobertura FFO (papel)", "ffo_cobertura"),
-              ("Alavancagem FII", "alavancagem"),
-              ("Dív.Líq/EBITDA", "divida_ebitda"), ("DY real (papel)", "dy_real")]
+EXTRAS_CSV = [("Yield exigido", "yield_alvo"), ("FII: % em imóveis", "fisico"),
+              ("FII: renda recorrente/cota 12m", "recorrente"), ("FII: cobertura recorrente", "cobertura"),
+              ("FII: ganho com vendas/cota 12m", "ganhos_venda"), ("FII: dívida/ativo", "alavancagem"),
+              ("FII: vacância", "vacancia"), ("FII: receita vencendo 12m", "venc_12m"),
+              ("FII: receita contratos >3 anos", "acima_36m"), ("Ação: ROE", "roe"), ("Ação: payout", "payout"),
+              ("Ação: dív.líq/EBITDA", "divida_ebitda"), ("Ação: receita 3a a.a.", "cresc_receita_3a"),
+              ("Ação: % em JCP", "jcp_frac"), ("Data do dado CVM", "cvm_ref")]
 
 
 def gerar_csv(resultados: list[Resultado], sug: dict[str, list[Sugestao]], caminho: Path,

@@ -23,6 +23,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # Guarda cotações B3 de meses fechados e informes CVM da semana entre execuções
+      # (sem isso, cada execução baixaria ~300 MB das fontes oficiais).
+      - uses: actions/cache@v4
+        with:
+          path: cache/permanente
+          key: fontes-oficiais-${{ github.run_id }}
+          restore-keys: fontes-oficiais-
       - name: Rodar a varredura
         env:
           TZ: America/Cuiaba

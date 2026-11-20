@@ -1,21 +1,26 @@
 """Motor de Oportunidades — Barsi + Axiomas de Zurique + Kiyosaki.
 
-Varre ações (setores BESST) e FIIs (logística, papel, renda urbana) em busca de bons
-pagadores de proventos cuja cota caiu por debandada do mercado, não por piora da renda.
+Varre FIIs de TIJOLO e ações de empresas BESST em busca de bons pagadores de proventos
+cuja cota caiu por debandada do mercado, não por piora da renda.
+
+Fontes (somente primárias): B3 (cotações, proventos, cadastro), CVM (informes de FII e
+demonstrações das empresas) e Banco Central (Selic, IPCA, Focus).
 
 Uso:
     python analisar.py                     # varredura completa
     python analisar.py --abrir             # varre e abre o relatório no navegador
     python analisar.py --tickers TRXF11,BBAS3,HGLG11
     python analisar.py --so fiis
-    python analisar.py --sem-cache         # ignora o cache do dia e baixa tudo de novo
+    python analisar.py --sem-cache         # ignora o cache do dia (proventos, juros) e baixa de novo
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 import shutil
 import sys
+import time
 import tomllib
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
@@ -24,104 +29,265 @@ from pathlib import Path
 from motor import analise, coleta, relatorio, sugestoes
 
 RAIZ = Path(__file__).resolve().parent
+ESPECIES_ACAO = ("ON", "PN", "PNA", "PNB", "UNT")
 
 
-def baixar_historicos(cache: coleta.Cache, tickers: list[str], workers: int) -> dict:
-    def tarefa(t):
-        try:
-            return t, coleta.historico(cache, t)
-        except Exception as e:  # ticker sem dados no Yahoo, rede etc.
-            print(f"\n  aviso: sem histórico para {t} ({e})", file=sys.stderr)
-            return t, None
+# --------------------------------------------------------------------------- séries B3
 
-    saida = {}
-    if not tickers:
-        return saida
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        for i, (t, h) in enumerate(ex.map(tarefa, tickers), 1):
-            saida[t] = h
-            if sys.stdout.isatty():
-                print(f"\r  histórico {i}/{len(tickers)}", end="", flush=True)
-    print(f"\r  histórico {len(tickers)}/{len(tickers)} ok")
-    return saida
+def pregoes(cot: dict) -> list[int]:
+    """Datas de pregão (pela série do BOVA11, que negocia todo dia)."""
+    return [x[0] for x in (cot.get("BOVA11") or {}).get("d", [])]
 
 
-def anexar_detalhes(cache: coleta.Cache, linhas: list[dict], workers: int) -> None:
-    """Página de detalhes do Fundamentus (FFO/cota, ativos x PL, dívida/EBITDA) -> linha['_det']."""
-    def tarefa(l):
-        try:
-            return coleta.detalhes(cache, l["Papel"])
-        except Exception as e:
-            print(f"\n  aviso: sem detalhes para {l['Papel']} ({e})", file=sys.stderr)
-            return {}
-
-    if not linhas:
-        return
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        for l, det in zip(linhas, ex.map(tarefa, linhas)):
-            l["_det"] = det
-    print(f"  detalhes {len(linhas)}/{len(linhas)} ok")
+def liquidez(serie: dict, ultimos: list[int]) -> float:
+    """Volume financeiro médio por pregão nos últimos ~2 meses (dias sem negócio contam zero)."""
+    alvo = set(ultimos)
+    return sum(v for d, c, h, v in serie["d"] if d in alvo) / max(len(ultimos), 1)
 
 
-def um_por_empresa(linhas: list[dict]) -> list[dict]:
-    """Mantém só o ticker mais líquido de cada empresa (ex.: TAEE11 em vez de TAEE3/TAEE4)."""
-    melhor: dict[str, dict] = {}
-    for l in linhas:
-        raiz = l["Papel"][:4]
-        liq = analise.num(l.get("Liq.2meses")) or 0
-        if raiz not in melhor or liq > (analise.num(melhor[raiz].get("Liq.2meses")) or 0):
-            melhor[raiz] = l
-    return list(melhor.values())
+def eventos_de(prov: dict, isins: set[str]) -> list[tuple[float, float]]:
+    """(data-com, multiplicador de quantidade) de desdobramentos, bonificações e grupamentos."""
+    vistos, out = set(), []
+    for e in prov.get("stockDividends") or []:
+        rot = (e.get("label") or "").upper()
+        if e.get("isinCode") not in isins or not any(x in rot for x in ("DESDOBR", "BONIFIC", "GRUPAM")):
+            continue
+        t, fat = coleta.data_br(e.get("lastDatePrior", "")), coleta.num_br(e.get("factor"))
+        if not t or not fat:
+            continue
+        mult = fat if "GRUPAM" in rot else 1 + fat / 100
+        if (t, round(mult, 6)) not in vistos:
+            vistos.add((t, round(mult, 6)))
+            out.append((t, mult))
+    return out
 
 
-def varrer(cache, cfg, so: str | None) -> tuple[list, int]:
-    workers = cfg["geral"]["workers"]
-    resultados, prefiltrados = [], 0
-
-    if so in (None, "fiis"):
-        print("FIIs: lendo Fundamentus...")
-        linhas = coleta.fiis(cache)
-        cand = [l for l in linhas if not analise.prefiltro_fii(l, cfg)]
-        prefiltrados += len(linhas) - len(cand)
-        print(f"  {len(linhas)} FIIs, {len(cand)} passam no pré-filtro")
-        hist = baixar_historicos(cache, [l["Papel"] for l in cand], workers)
-        anexar_detalhes(cache, cand, workers)
-        resultados += [analise.avaliar_fii(l, hist.get(l["Papel"]), cfg) for l in cand]
-
-    if so in (None, "acoes"):
-        print("Ações: lendo Fundamentus por setor...")
-        linhas = []
-        for sid in cfg["acoes"]["setores"]:
-            for l in coleta.acoes(cache, sid):
-                l["_setor"] = sid
-                linhas.append(l)
-        linhas = um_por_empresa(linhas)
-        cand = [l for l in linhas if not analise.prefiltro_acao(l, cfg)]
-        prefiltrados += len(linhas) - len(cand)
-        print(f"  {len(linhas)} empresas nos setores escolhidos, {len(cand)} passam no pré-filtro")
-        hist = baixar_historicos(cache, [l["Papel"] for l in cand], workers)
-        anexar_detalhes(cache, cand, workers)
-        resultados += [analise.avaliar_acao(l, hist.get(l["Papel"]), cfg, l["_setor"]) for l in cand]
-
-    return resultados, prefiltrados
+def fator_ajuste(t: float, eventos: list[tuple[float, float]]) -> float:
+    """Divisor para trazer um valor da data t para a base de ações/cotas de hoje."""
+    f = 1.0
+    for te, mult in eventos:
+        if t <= te:
+            f *= mult
+    return f
 
 
-def analisar_tickers(cache, cfg, tickers: list[str]) -> list:
-    fiis = {l["Papel"]: l for l in coleta.fiis(cache)}
-    acoes = {l["Papel"]: l for l in coleta.acoes(cache)}
-    hist = baixar_historicos(cache, tickers, cfg["geral"]["workers"])
-    anexar_detalhes(cache, [fiis.get(t) or acoes[t] for t in tickers if t in fiis or t in acoes],
-                    cfg["geral"]["workers"])
-    resultados = []
-    for t in tickers:
-        if t in fiis:
-            resultados.append(analise.avaliar_fii(fiis[t], hist.get(t), cfg))
-        elif t in acoes:
-            setor = coleta.setor_da_acao(cache, t) or (None, "")
-            resultados.append(analise.avaliar_acao(acoes[t], hist.get(t), cfg, setor[0], setor[1]))
+def precos_ajustados(serie: dict, eventos) -> list[tuple[float, float, float]]:
+    out = []
+    for d, c, h, v in serie["d"]:
+        t = coleta.ts_de(d)
+        f = fator_ajuste(t, eventos)
+        out.append((t, c / f, h / f))
+    return out
+
+
+def proventos_de(prov: dict, isin: str, eventos, ir_jcp: float, fii: bool):
+    """(lista [(data-com, valor líquido ajustado)], fração em JCP). Amortização não é renda."""
+    vistos, out, bruto, jcp = set(), [], 0.0, 0.0
+    agora = time.time()
+    for c in prov.get("cashDividends") or []:
+        if c.get("isinCode") != isin:
+            continue
+        rot = (c.get("label") or "").upper()
+        t, v = coleta.data_br(c.get("lastDatePrior", "")), coleta.num_br(c.get("rate"))
+        if not t or not v or v <= 0:
+            continue
+        chave = (t, round(v, 8), rot)
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        if fii:
+            if "RENDIMENTO" not in rot and "DIVIDENDO" not in rot:
+                continue
+            liquido = v
+        elif "JRS" in rot or "JUROS" in rot:
+            liquido = v * (1 - ir_jcp)
+            if t > agora - analise.ANO:
+                jcp += v
+        elif "DIVIDENDO" in rot or "RENDIMENTO" in rot:
+            liquido = v
         else:
-            print(f"  aviso: {t} não encontrado no Fundamentus", file=sys.stderr)
-    return resultados
+            continue
+        if t > agora - analise.ANO:
+            bruto += v
+        out.append((t, liquido / fator_ajuste(t, eventos)))
+    out.sort()
+    return out, (jcp / bruto if bruto else 0.0)
+
+
+def proventos_totais_12m(prov: dict, eventos) -> float | None:
+    """Total pago pela empresa em 12 meses (ON × qtd ON + PN × qtd PN), para o payout."""
+    q_on, q_pn = coleta.num_br(prov.get("numberCommonShares")), coleta.num_br(prov.get("numberPreferredShares"))
+    agora, total, vistos = time.time(), 0.0, set()
+    for c in prov.get("cashDividends") or []:
+        isin = c.get("isinCode") or ""
+        classe = isin[6:11]
+        t, v = coleta.data_br(c.get("lastDatePrior", "")), coleta.num_br(c.get("rate"))
+        if not t or not v or t <= agora - analise.ANO or t > agora or (isin, t, v, c.get("label")) in vistos:
+            continue
+        vistos.add((isin, t, v, c.get("label")))
+        v /= fator_ajuste(t, eventos)
+        if classe == "ACNOR" and q_on:
+            total += v * q_on
+        elif classe.startswith("ACNP") and q_pn:
+            total += v * q_pn
+    return total or None
+
+
+def listado(txt: str | None) -> float | None:
+    return coleta.data_br(txt) if txt else None
+
+
+def em_paralelo(func, itens, workers):
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        return list(ex.map(func, itens))
+
+
+# --------------------------------------------------------------------------- FIIs
+
+def fora_do_escopo_fii(tk: str, cvm: dict | None, cfg: dict) -> str | None:
+    f = cfg["fiis"]
+    manual = (f.get("manual") or {}).get(tk) or {}
+    if not cvm:
+        return "sem informe na CVM"
+    ti = cvm.get("total_investido") or 0
+    if not ti or cvm.get("imoveis_fisicos", 0) / ti < f["tijolo_fisico_minimo"]:
+        return "não é tijolo"
+    nome = cvm.get("nome", "").upper()
+    if re.search(r"\bFOF\b|FUNDOS? DE FUNDOS", nome):
+        return "fundo de fundos"
+    if cvm.get("segmento") in f["segmentos_excluidos"] and not manual.get("segmento"):
+        return "segmento"
+    if any(p in nome for p in f["palavras_excluidas"]) or manual.get("excluir"):
+        return "segmento"
+    return None
+
+
+def montar_fii(cache, cfg, cot, tk, cvm, ult) -> dict:
+    s = cot[tk]
+    d = {"ticker": tk, "nome": s["nome"], "cvm": cvm, "liquidez": liquidez(s, ult),
+         "preco": s["d"][-1][1] if s["d"] and s["d"][-1][0] >= ult[0] else None}
+    try:
+        prov = coleta.proventos_fii(cache, cvm["cnpj"], tk[:4]) if cvm else {}
+    except Exception as e:
+        print(f"  aviso: proventos de {tk} indisponíveis na B3 ({e})", file=sys.stderr)
+        prov = {}
+    ev = eventos_de(prov, {s["isin"]})
+    d["precos"] = precos_ajustados(s, ev)
+    recentes, _ = proventos_de(prov, s["isin"], ev, 0.0, fii=True)
+    # B3 traz ~12 meses com data-com exata; antes disso, o rendimento mensal oficial do informe da CVM
+    inicio_b3 = recentes[0][0] if recentes else time.time()
+    antigos = [(t, v / fator_ajuste(t, ev)) for t, v in (cvm or {}).get("rendimentos_mensais", [])
+               if t < inicio_b3 - 10 * analise.DIA]
+    d["dividendos"] = antigos + recentes
+    d["listado_desde"] = listado(prov.get("quotedPer"))
+    return d
+
+
+# --------------------------------------------------------------------------- ações
+
+def setor_besst(cfg, classificacao: str | None) -> str | None:
+    for prefixo, rotulo in cfg["acoes"]["setores"].items():
+        if classificacao and classificacao.startswith(prefixo):
+            return rotulo
+    return None
+
+
+def montar_acao(cache, cfg, cot, tk, empresa, detalhe, fund, ult) -> dict:
+    s = cot[tk]
+    d = {"ticker": tk, "nome": detalhe.get("companyName") or empresa.get("nome", ""),
+         "setor_b3": detalhe.get("industryClassification"),
+         "setor": setor_besst(cfg, detalhe.get("industryClassification")),
+         "liquidez": liquidez(s, ult), "cvm": fund, "code_cvm": empresa.get("codeCVM"),
+         "preco": s["d"][-1][1] if s["d"] and s["d"][-1][0] >= ult[0] else None}
+    try:
+        prov = coleta.proventos_empresa(cache, tk[:4])
+    except Exception as e:
+        print(f"  aviso: proventos de {tk} indisponíveis na B3 ({e})", file=sys.stderr)
+        prov = {}
+    isins = {c.get("isin") for c in detalhe.get("otherCodes") or []} | {s["isin"]}
+    ev = eventos_de(prov, {s["isin"]}) or eventos_de(prov, isins)
+    d["precos"] = precos_ajustados(s, ev)
+    # histórico completo (rota de histórico da B3, por classe ON/PN/UNT) + os mais recentes (por ISIN)
+    try:
+        hist = coleta.historico_proventos_empresa(cache, detalhe.get("tradingName") or "")
+    except Exception as e:
+        print(f"  aviso: histórico de proventos de {tk} indisponível na B3 ({e})", file=sys.stderr)
+        hist = []
+    classe = s["esp"].strip()
+    extra = [{"isinCode": s["isin"], "label": h.get("corporateAction"), "lastDatePrior": h.get("lastDatePriorEx"),
+              "rate": h.get("valueCash")} for h in hist if (h.get("typeStock") or "").strip() == classe]
+    prov_total = dict(prov, cashDividends=(prov.get("cashDividends") or []) + extra)
+    d["dividendos"], d["jcp_frac"] = proventos_de(prov_total, s["isin"], ev, cfg["geral"]["ir_jcp"], fii=False)
+    d["proventos_total_12m"] = proventos_totais_12m(prov, ev)
+    d["listado_desde"] = listado(prov.get("quotedPerSharSince"))
+    return d
+
+
+def candidatas_acoes(cache, cfg, cot, ult, tickers=None):
+    """[(ticker, empresa, detalhe)] — uma ação por empresa, só setores BESST (ou os tickers pedidos)."""
+    a = cfg["acoes"]
+    empresas = coleta.empresas_b3(cache)
+    liq = {}
+    for tk, s in cot.items():
+        if s["bdi"] != "02" or s["esp"].strip() not in ESPECIES_ACAO:
+            continue
+        if tickers is not None:
+            if tk in tickers:
+                liq[tk] = liquidez(s, ult)
+        else:
+            l = liquidez(s, ult)
+            if l >= a["liquidez_minima"]:
+                liq[tk] = l
+    raizes = sorted({tk[:4] for tk in liq if tk[:4] in empresas})
+    detalhes = dict(zip(raizes, em_paralelo(
+        lambda rz: _detalhe_seguro(cache, empresas[rz]["codeCVM"]), raizes, cfg["geral"]["workers"])))
+    melhor: dict[str, str] = {}
+    for tk, l in liq.items():
+        rz = tk[:4]
+        det = detalhes.get(rz) or {}
+        if tickers is None and not setor_besst(cfg, det.get("industryClassification")):
+            continue
+        if rz not in melhor or l > liq[melhor[rz]]:
+            melhor[rz] = tk
+    return [(tk, empresas[rz], detalhes.get(rz) or {}) for rz, tk in melhor.items()]
+
+
+def _detalhe_seguro(cache, code):
+    try:
+        return coleta.detalhe_empresa(cache, code)
+    except Exception:
+        return {}
+
+
+# --------------------------------------------------------------------------- execução
+
+def contexto_mercado(cache, cfg, cot) -> dict:
+    agora = dt.datetime.now()
+    ctx = {"data": agora.strftime("%d/%m/%Y %H:%M"),
+           "ipca": coleta.ipca_12m(cache), "selic_ciclo": coleta.selic_ciclo(cache),
+           "focus": coleta.focus(cache, "Selic"), "focus_ipca": coleta.focus(cache, "IPCA")}
+    ult = pregoes(cot)
+    if ult:
+        d = ult[-1]
+        ctx["cotacoes_ate"] = f"{d % 100:02d}/{d // 100 % 100:02d}/{d // 10000}"
+    proximo = str(agora.year + 1)
+    fs, fi = dict(ctx["focus"]), dict(ctx["focus_ipca"])
+    ano = proximo if proximo in fs and proximo in fi else str(agora.year)
+    if ano in fs and ano in fi:
+        ctx["juro_real"] = (1 + fs[ano]) / (1 + fi[ano]) - 1
+        ctx["juro_real_ano"] = ano
+    ctx["indices"], cfg["_indices"] = [], {}
+    for classe, chave, nome in (("FII", "indice_fiis", "IFIX"), ("Ação", "indice_acoes", "Ibovespa")):
+        s = cot.get(cfg["sinais"][chave])
+        if s and s["d"]:
+            ref = s["d"][-1][0] - 10000
+            mx = max(h for d, c, h, v in s["d"] if d > ref)
+            q = s["d"][-1][1] / mx - 1
+            cfg["_indices"][classe] = (nome, q)
+            ctx["indices"].append((f"{nome} 52s", q))
+    cfg["_ipca"] = ctx["ipca"][0] if ctx["ipca"] else None
+    cfg["_juro_real"] = ctx.get("juro_real")
+    return ctx
 
 
 def main() -> int:
@@ -132,52 +298,62 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Motor de oportunidades Barsi/Zurique/Kiyosaki")
     ap.add_argument("--tickers", help="analisa só estes ativos, separados por vírgula")
     ap.add_argument("--so", choices=["acoes", "fiis"], help="varre só ações ou só FIIs")
-    ap.add_argument("--sem-cache", action="store_true", help="baixa tudo de novo")
+    ap.add_argument("--sem-cache", action="store_true", help="baixa de novo os dados do dia")
     ap.add_argument("--abrir", action="store_true", help="abre o relatório no navegador")
     ap.add_argument("--config", default=str(RAIZ / "config.toml"))
     args = ap.parse_args()
 
-    with open(args.config, "rb") as f:
-        cfg = tomllib.load(f)
-
+    with open(args.config, "rb") as fh:
+        cfg = tomllib.load(fh)
     cache = coleta.Cache(RAIZ / cfg["geral"]["pasta_cache"], ativo=not args.sem_cache)
+    workers = cfg["geral"]["workers"]
+    pedidos = ({t.strip().upper() for t in args.tickers.split(",") if t.strip()}
+               if args.tickers else None)
+
+    print("B3: cotações oficiais (COTAHIST)...")
+    cot = coleta.cotacoes(cache, cfg["geral"]["anos_cotacao"])
+    ult = pregoes(cot)[-42:]
+    contexto = contexto_mercado(cache, cfg, cot)
+    resultados, fora = [], 0
+
+    if args.so in (None, "fiis"):
+        print("CVM: informes dos FIIs...")
+        cvm = coleta.fiis_cvm(cache)
+        lista = []
+        for tk, s in cot.items():
+            if s["bdi"] != "12" or (pedidos is not None and tk not in pedidos):
+                continue
+            info = cvm.get(s["isin"])
+            if pedidos is None:
+                if liquidez(s, ult) < cfg["fiis"]["liquidez_minima"]:
+                    continue
+                if fora_do_escopo_fii(tk, info, cfg):
+                    fora += 1
+                    continue
+            lista.append((tk, info))
+        print(f"  {len(lista)} FIIs de tijolo líquidos ({fora} fora do escopo: papel, FoF, segmento)")
+        dados = em_paralelo(lambda x: montar_fii(cache, cfg, cot, x[0], x[1], ult), lista, workers)
+        resultados += [analise.avaliar_fii(d, cfg) for d in dados]
+
+    if args.so in (None, "acoes"):
+        print("B3: empresas e classificação setorial...")
+        cands = candidatas_acoes(cache, cfg, cot, ult, pedidos)
+        print(f"  {len(cands)} empresas{' BESST' if pedidos is None else ''} líquidas; CVM: demonstrações...")
+        fund = coleta.cias_cvm(cache, {int(e["codeCVM"]) for _, e, _ in cands})
+        dados = em_paralelo(lambda x: montar_acao(cache, cfg, cot, x[0], x[1], x[2],
+                                                  fund.get(int(x[1]["codeCVM"]), {}), ult), cands, workers)
+        resultados += [analise.avaliar_acao(d, cfg) for d in dados]
+
+    contexto["prefiltrados"] = fora
     agora = dt.datetime.now()
-    contexto = {
-        "data": agora.strftime("%d/%m/%Y %H:%M"),
-        "selic": coleta.indicador_bcb(cache, 432),
-        "ipca": coleta.indicador_bcb(cache, 13522),
-        "selic_ciclo": coleta.selic_ciclo(cache),
-        "focus": coleta.focus_selic(cache),
-    }
-    cfg["_ipca"] = contexto["ipca"][0] if contexto["ipca"] else None
-
-    cfg["_indices"] = {}
-    contexto["indices"] = []
-    for classe, chave, nome in (("FII", "indice_fiis", "IFIX"), ("Ação", "indice_acoes", "Ibovespa")):
-        try:
-            h = coleta.historico(cache, cfg["sinais"][chave]) or {}
-            m = analise.metricas_historicas(h)
-            if m.get("max52"):
-                queda = h["precos"][-1][1] / m["max52"] - 1
-                cfg["_indices"][classe] = (nome, queda)
-                contexto["indices"].append((f"{nome} 52s", queda))
-        except Exception as e:
-            print(f"  aviso: índice {nome} indisponível ({e}); usando queda absoluta", file=sys.stderr)
-
-    if args.tickers:
-        tickers = [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
-        resultados = analisar_tickers(cache, cfg, tickers)
-    else:
-        resultados, contexto["prefiltrados"] = varrer(cache, cfg, args.so)
-
-    pasta = RAIZ / cfg["geral"]["pasta_relatorios"] / agora.strftime("%Y-%m-%d_%H%M")
+    pasta = RAIZ / cfg["geral"]["pasta_relatorios"] / agora.strftime("%Y-%m-%d_%H%M%S")
     pasta.mkdir(parents=True, exist_ok=True)
     html_path, csv_path = pasta / "relatorio.html", pasta / "dados.csv"
     sug = sugestoes.gerar(resultados, cfg)
     compra = sugestoes.ranking_compra(resultados, cfg)
     web_path = RAIZ / "web" / "painel.html"
     web_path.parent.mkdir(exist_ok=True)
-    relatorio.gerar_html(resultados, sug, contexto, html_path, web_path if not args.tickers else None,
+    relatorio.gerar_html(resultados, sug, contexto, html_path, web_path if not pedidos else None,
                          compra, cfg["compra"]["max_por_grupo"])
     relatorio.gerar_csv(resultados, sug, csv_path, compra[0])
     shutil.copyfile(html_path, pasta.parent / "ultimo_relatorio.html")

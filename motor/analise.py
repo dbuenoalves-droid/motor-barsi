@@ -1,5 +1,8 @@
 """Regras do motor: métricas históricas, filtros, sinais de desconto e classificação.
 
+Escopo: só ativos físicos — FIIs de TIJOLO (imóveis reais) e ações de empresas BESST.
+Fundos de papel (CRI), fundos de fundos, híbridos e qualquer outro fundo ficam de fora.
+
 Ideia central (caso TRXF11): bom pagador cuja COTA caiu muito enquanto a RENDA se
 manteve. Se a renda caiu junto, não é debandada; é problema real (3º Axioma).
 """
@@ -11,7 +14,7 @@ import statistics
 import time
 from dataclasses import dataclass, field
 
-from .formato import brl, dec, pct
+from .formato import brl, dec, mi, pct
 
 DIA = 86400.0
 ANO = 365 * DIA
@@ -22,22 +25,6 @@ ESTRUTURAL = "ESTRUTURAL"
 VITRINE = "VITRINE"
 DESCARTADO = "DESCARTADO"
 ORDEM_STATUS = [OPORTUNIDADE, OBSERVAR, ESTRUTURAL, VITRINE, DESCARTADO]
-
-
-def num(txt) -> float | None:
-    """'1.234,56' -> 1234.56 ; '20,89%' -> 0.2089 ; '-' -> None"""
-    if txt is None:
-        return None
-    s = str(txt).strip()
-    eh_pct = s.endswith("%")
-    s = s.replace("%", "").replace(".", "").replace(",", ".").strip()
-    if s in ("", "-"):
-        return None
-    try:
-        v = float(s)
-    except ValueError:
-        return None
-    return v / 100 if eh_pct else v
 
 
 def _lim(x: float | None, escala: float) -> float:
@@ -52,10 +39,10 @@ class Resultado:
     nome: str
     classe: str                     # "FII" ou "Ação"
     segmento: str
-    tipo: str = ""                  # Tijolo/Papel (FII) ou setor (ação)
+    tipo: str = ""                  # "Tijolo" (FII) ou setor (ação)
     preco: float | None = None
     teto: float | None = None
-    teto_bruto: float | None = None # teto pelos proventos pagos, antes do limite do FFO
+    teto_bruto: float | None = None # teto pelos proventos pagos, antes do limite da renda recorrente
     margem: float | None = None
     dpa12: float | None = None
     dpa_media: float | None = None
@@ -63,13 +50,12 @@ class Resultado:
     dy_medio: float | None = None
     expansao_dy: float | None = None
     queda52: float | None = None
-    queda3a: float | None = None
     queda_rel: float | None = None  # queda 52s menos a queda do índice (negativo = caiu mais)
     cresc_dpa: float | None = None  # crescimento anual dos proventos em 3 anos
     pvp: float | None = None
     tendencia: float | None = None
     liquidez: float | None = None
-    renda_mil: float | None = None  # renda mensal estimada por R$ 1.000
+    renda_mil: float | None = None  # renda mensal líquida por R$ 1.000
     cotas_mil: float | None = None  # quantas cotas/ações R$ 1.000 compram (Barsi: quantidade)
     score: float = 0.0
     status: str = ""
@@ -84,17 +70,18 @@ class Resultado:
 
 # --------------------------------------------------------------------------- histórico
 
-def metricas_historicas(hist: dict, anos_media: int = 3, agora: float | None = None) -> dict:
+def metricas_historicas(precos: list, divs: list, anos_media: int = 3, listado_desde: float | None = None,
+                        agora: float | None = None) -> dict:
+    """precos: [(ts, fechamento, máxima)] ajustados; divs: [(ts data-com, valor líquido por cota/ação)]."""
     agora = agora or time.time()
-    precos = hist.get("precos") or []
-    divs = hist.get("dividendos") or []
-    if len(precos) < 10:
+    if len(precos) < 60:
         return {}
 
     def soma(ini: float, fim: float) -> float:
         return sum(a for t, a in divs if ini < t <= fim)
 
-    t0 = precos[0][0]
+    t0_preco = precos[0][0]
+    t0 = min(listado_desde or t0_preco, t0_preco)
     anos = (agora - t0) / ANO
     anos_int = int(anos + 0.05)
     m: dict = {"anos_historico": anos}
@@ -114,26 +101,22 @@ def metricas_historicas(hist: dict, anos_media: int = 3, agora: float | None = N
                           if len(pag12) >= 4 else None)
     m["cv_rend"] = (statistics.pstdev(pag12) / statistics.fmean(pag12)
                     if len(pag12) >= 6 else None)
-    antigo = soma(agora - 4 * ANO, agora - 3 * ANO) if anos_int >= 4 else 0
+    antigo = soma(agora - 4 * ANO, agora - 3 * ANO)
     m["cresc_dpa_3a"] = ((m["dpa12"] / antigo) ** (1 / 3) - 1
-                         if antigo > 0 and m["dpa12"] > 0 else None)
-
+                         if antigo > 0 and m["dpa12"] > 0 and anos_int >= 4 else None)
     m["max52"] = max((h for t, c, h in precos if t > agora - ANO), default=None)
-    m["max3a"] = max((h for t, c, h in precos if t > agora - 3 * ANO), default=None)
-    fech3a = [c for t, c, h in precos if t > agora - 3 * ANO]
-    m["media_preco_3a"] = statistics.fmean(fech3a) if fech3a else None
-
-    # DY "normal" do ativo: média do DY 12m em cada semana, do 2º ano até 3 meses atrás
-    dys = [soma(t - ANO, t) / c for t, c, h in precos
-           if t - ANO >= t0 and t <= agora - 91 * DIA]
+    # DY "normal" do ativo: média do DY 12m semana a semana, do 2º ano de cotação até 3 meses atrás
+    semanais = precos[::5]
+    dys = [soma(t - ANO, t) / c for t, c, h in semanais
+           if t - ANO >= t0 and t <= agora - 91 * DIA and c > 0]
     m["dy_medio"] = statistics.fmean(dys) if len(dys) >= 26 else None
     return m
 
 
 def _aplicar_historico(r: Resultado, m: dict, yield_alvo: float, cfg: dict,
-                       base_recorrente: float | None = None) -> None:
-    """base_recorrente: renda anual por cota que se repete (FFO/cota no FII de tijolo).
-    Quando menor que os proventos pagos, limita o teto — venda de imóvel não conta."""
+                       base_recorrente: float | None = None, tolerancia: float = 1.0) -> None:
+    """base_recorrente: renda anual por cota que se repete (resultado recorrente da CVM no FII).
+    Se cobrir menos que `tolerancia` dos proventos pagos, ela limita o teto."""
     s = cfg["sinais"]
     r.dpa12, r.dpa_media = m.get("dpa12"), m.get("dpa_media")
     r.cresc_dpa = m.get("cresc_dpa_3a")
@@ -147,8 +130,6 @@ def _aplicar_historico(r: Resultado, m: dict, yield_alvo: float, cfg: dict,
             r.renda_mil = 1000 * r.dy12 / 12
         if m.get("max52"):
             r.queda52 = r.preco / m["max52"] - 1
-        if m.get("max3a"):
-            r.queda3a = r.preco / m["max3a"] - 1
     r.dy_medio = m.get("dy_medio")
     if r.dy12 and r.dy_medio:
         r.expansao_dy = r.dy12 / r.dy_medio - 1
@@ -157,14 +138,15 @@ def _aplicar_historico(r: Resultado, m: dict, yield_alvo: float, cfg: dict,
 
     # Preço teto Barsi, conservador: menor entre o DPA de 12m e a média de N anos
     base = r.dpa12 if r.dpa_media is None else min(r.dpa12 or 0, r.dpa_media)
-    if base and base > 0 and base_recorrente and 0 < base_recorrente < base:
+    if base and base > 0 and base_recorrente is not None and base_recorrente < base * tolerancia:
         r.teto_bruto = base / yield_alvo
-        base = base_recorrente
+        base = max(base_recorrente, 0)
     if base and base > 0:
         r.extras["dpa_base"] = base     # renda anual conservadora/recorrente por cota
         r.teto = base / yield_alvo
         if r.preco:
             r.margem = r.teto / r.preco - 1
+    r.extras["yield_alvo"] = yield_alvo
 
     if r.tendencia is not None and r.tendencia < s["tendencia_proventos_minima"]:
         r.estrutural = True
@@ -173,218 +155,155 @@ def _aplicar_historico(r: Resultado, m: dict, yield_alvo: float, cfg: dict,
             f"{m['anos_media_usados']} anos: a renda caiu junto com a cota")
 
 
-# --------------------------------------------------------------------------- pré-filtros
-
-def prefiltro_fii(linha: dict, cfg: dict) -> list[str]:
-    f = cfg["fiis"]
-    motivos = []
-    if linha.get("Segmento", "") not in f["segmentos_permitidos"]:
-        motivos.append("segmento")
-    if (num(linha.get("Liquidez")) or 0) < f["liquidez_minima"]:
-        motivos.append("liquidez")
-    if (num(linha.get("Dividend Yield")) or 0) < f["dy_pre_filtro"]:
-        motivos.append("dy")
-    if not num(linha.get("P/VP")):
-        motivos.append("pvp")
-    return motivos
+def yield_minimo(piso: float, premio: float | None, juro_real: float | None) -> float:
+    """Yield exigido = maior entre o piso da classe e (juro real esperado + prêmio).
+    Aluguel e dividendo crescem com a inflação, então competem com o juro REAL."""
+    if premio is None or juro_real is None:
+        return piso
+    return max(piso, juro_real + premio)
 
 
-def prefiltro_acao(linha: dict, cfg: dict) -> list[str]:
-    a = cfg["acoes"]
-    motivos = []
-    if (num(linha.get("Liq.2meses")) or 0) < a["liquidez_minima"]:
-        motivos.append("liquidez")
-    if (num(linha.get("Div.Yield")) or 0) < a["dy_pre_filtro"]:
-        motivos.append("dy")
-    if (num(linha.get("P/L")) or 0) <= 0:
-        motivos.append("prejuizo")
-    return motivos
+# --------------------------------------------------------------------------- FII de tijolo
 
-
-# --------------------------------------------------------------------------- avaliação
-
-TIPOS_FII = ("Tijolo", "Papel", "Híbrido", "FoF")
-
-
-def _tipo_fii(ticker: str, nome_up: str, segmento: str, imoveis: float | None,
-              imoveis_pl: float | None, f: dict) -> tuple[str, str]:
-    """(tipo, origem). Ordem: tabela manual > FoF pelo nome > Imóveis/PL > segmento/qtd de imóveis.
-
-    O Fundamentus chama de 'Multicategoria' fundos de CRI e de tijolo; a fração do PL em
-    imóveis físicos é o que de fato separa um do outro.
-    """
-    manual = ((f.get("manual") or {}).get(ticker) or {}).get("tipo")
-    if manual in TIPOS_FII:
-        return manual, "manual"
-    if re.search(r"\bFOF|FUNDOS? DE FUNDOS", nome_up):
-        return "FoF", "nome"
-    if imoveis_pl is not None:
-        if imoveis_pl < f.get("tipo_papel_imoveis_pl_max", 0.10):
-            return "Papel", "Imóveis/PL"
-        if imoveis_pl >= f.get("tipo_tijolo_imoveis_pl_min", 0.50):
-            return "Tijolo", "Imóveis/PL"
-        return "Híbrido", "Imóveis/PL"
-    papel = segmento == "Títulos e Val. Mob." or not imoveis
-    return ("Papel" if papel else "Tijolo"), "nome/segmento"
-
-
-def avaliar_fii(linha: dict, hist: dict | None, cfg: dict) -> Resultado:
+def avaliar_fii(d: dict, cfg: dict) -> Resultado:
     f, s = cfg["fiis"], cfg["sinais"]
-    r = Resultado(ticker=linha.get("Papel", "?"), nome=linha.get("_nome", ""),
-                  classe="FII", segmento=linha.get("Segmento", ""))
-    r.preco, r.pvp = num(linha.get("Cotação")), num(linha.get("P/VP"))
-    r.liquidez = num(linha.get("Liquidez"))
-    ffo, vac = num(linha.get("FFO Yield")), num(linha.get("Vacância Média"))
-    imoveis = num(linha.get("Qtd de imóveis"))
-    nome_up = r.nome.upper()
-    det = linha.get("_det") or {}
-    imoveis_pl = num(det.get("Imóveis/PL do FII"))
-    r.tipo, origem = _tipo_fii(r.ticker, nome_up, r.segmento, imoveis, imoveis_pl, f)
-    segmento_fundamentus = r.segmento
+    cvm = d.get("cvm") or {}
+    r = Resultado(ticker=d["ticker"], nome=cvm.get("nome") or d.get("nome", ""), classe="FII",
+                  segmento=cvm.get("segmento", "?"), tipo="Tijolo")
     manual = (f.get("manual") or {}).get(r.ticker) or {}
     if manual.get("segmento"):
         r.segmento = manual["segmento"]
-    papel = r.tipo == "Papel"
-    proibida = next((p for p in f.get("palavras_excluidas", []) if p in nome_up), None)
+    r.preco, r.liquidez = d.get("preco"), d.get("liquidez")
+    nome_up = r.nome.upper()
+
+    # ---- escopo: só tijolo (imóveis físicos), pela composição oficial da carteira na CVM
+    ti = cvm.get("total_investido") or 0
+    fisico = cvm.get("imoveis_fisicos", 0) / ti if ti else None
+    credito = cvm.get("credito", 0) / ti if ti else None
+    fundos = cvm.get("cotas_fundos", 0) / ti if ti else None
+    r.extras.update(fisico=fisico, credito=credito, cotas_fundos=fundos)
+    if not cvm:
+        r.descarte.append("Sem informe na CVM para este ISIN")
+    elif fisico is None:
+        r.descarte.append("Informe da CVM sem composição da carteira")
+    elif fisico < f["tijolo_fisico_minimo"]:
+        r.descarte.append(f"Não é tijolo: só {pct(fisico, 0)} em imóveis físicos "
+                          f"({pct(credito, 0)} em CRI/crédito, {pct(fundos, 0)} em cotas de outros fundos)")
+    if re.search(r"\bFOF\b|FUNDOS? DE FUNDOS", nome_up):
+        r.descarte.append("Fundo de fundos: intermediário a mais entre você e o imóvel")
+    if cvm.get("segmento") in f["segmentos_excluidos"] and not manual.get("segmento"):
+        r.descarte.append(f"Segmento '{cvm.get('segmento')}' fora do escopo perene")
+    proibida = next((p for p in f["palavras_excluidas"] if p in nome_up), None)
     if proibida:
         r.descarte.append(f"Nome indica segmento fora do escopo ('{proibida.title()}')")
-    if r.tipo == "FoF" and f.get("excluir_fof", False):
-        r.descarte.append("Fundo de fundos (FoF) fora do escopo: taxa dupla e renda de segunda mão")
-    multi = next((p for p in f.get("nomes_multiestrategia", []) if p in nome_up), None)
-    if multi:
-        r.descarte.append(f"Multiestratégia ('{multi.title()}'): carteira mista de cotas de FII, CRIs e "
-                          "imóveis que muda a critério do gestor — não dá para saber o que se compra")
-    if r.tipo == "Híbrido" and f.get("excluir_hibrido", False):
-        r.descarte.append(f"Híbrido ({pct(imoveis_pl, 0)} do PL em imóveis): nem tijolo nem papel — "
-                          "fora do escopo")
     if manual.get("excluir"):
-        motivo = manual.get("motivo") or "excluído manualmente em config.toml"
-        r.descarte.append(f"Fora do escopo: {motivo}")
-    ffo_cota = num(det.get("FFO/Cota"))
-    if ffo_cota is None and ffo is not None and r.preco:
-        ffo_cota = ffo * r.preco
-    ativos, pl = num(det.get("Ativos")), num(det.get("Patrim Líquido"))
-    alav = (ativos - pl) / pl if ativos and pl and pl > 0 else None
-    r.extras.update(ffo_yield=ffo, ffo_cota=ffo_cota, vacancia=vac, imoveis=imoveis,
-                    imoveis_pl=imoveis_pl, tipo_origem=origem, alavancagem=alav,
-                    valor_mercado=num(linha.get("Valor de Mercado")))
-
-    if segmento_fundamentus not in f["segmentos_permitidos"]:
-        r.descarte.append(f"Segmento '{segmento_fundamentus}' fora do escopo perene")
+        r.descarte.append(f"Fora do escopo: {manual.get('motivo') or 'excluído em config.toml'}")
     if (r.liquidez or 0) < f["liquidez_minima"]:
         r.descarte.append(f"Liquidez baixa ({brl(r.liquidez, 0)}/dia)")
-    if not r.preco or not r.pvp:
-        r.descarte.append("Sem cotação ou P/VP no Fundamentus")
+    if not r.preco:
+        r.descarte.append("Sem cotação recente na B3")
 
-    m = metricas_historicas(hist, cfg["geral"]["anos_media_proventos"]) if hist else {}
+    vp = cvm.get("vp_cota")
+    r.pvp = r.preco / vp if r.preco and vp else None
+    va = cvm.get("valor_ativo") or 0
+    alav = cvm.get("divida", 0) / va if va else None
+    rec = cvm.get("recorrente") or {}
+    r.extras.update(alavancagem=alav, securitizacao=cvm.get("securitizacao"),
+                    obrig_aquisicao=cvm.get("obrig_aquisicao"), vacancia=cvm.get("vacancia"),
+                    imoveis=cvm.get("qtd_imoveis"), venc_12m=cvm.get("venc_12m"),
+                    acima_36m=cvm.get("acima_36m"), vp_cota=vp, cvm_ref=cvm.get("data_ref"),
+                    recorrente=rec.get("por_cota"), recorrente_motivo=rec.get("motivo"),
+                    ganhos_venda=rec.get("ganhos_por_cota"), cnpj=cvm.get("cnpj"))
+
+    m = metricas_historicas(d.get("precos") or [], d.get("dividendos") or [],
+                            cfg["geral"]["anos_media_proventos"], d.get("listado_desde"))
     if not m:
-        r.descarte.append("Sem histórico de cotações/proventos")
+        r.descarte.append("Sem histórico de cotações suficiente na B3")
     else:
-        yield_alvo = {"Papel": f["yield_minimo_papel"],
-                      "Híbrido": f.get("yield_minimo_hibrido", f["yield_minimo_papel"]),
-                      "FoF": f.get("yield_minimo_fof", f["yield_minimo_papel"]),
-                      }.get(r.tipo, f["yield_minimo_tijolo"])
-        recorrente = (ffo_cota if r.tipo in ("Tijolo", "Híbrido") and f.get("teto_pelo_ffo", True)
-                      else None)
-        _aplicar_historico(r, m, yield_alvo, cfg, recorrente)
+        y = yield_minimo(f["yield_minimo_tijolo"], f.get("premio_sobre_juro_real"), cfg.get("_juro_real"))
+        _aplicar_historico(r, m, y, cfg, rec.get("por_cota"), f["cobertura_recorrente_minima"])
+        if r.dpa12 and rec.get("por_cota") is not None:
+            r.extras["cobertura"] = rec["por_cota"] / r.dpa12
         if r.teto_bruto:
             r.alertas.append(
-                f"Teto limitado ao FFO/cota ({brl(ffo_cota)}/ano): pelos proventos pagos seria "
-                f"{brl(r.teto_bruto)}, mas a diferença não é renda recorrente de aluguel")
-        # DY real: desconta o IPCA da parte do PL em crédito (papel: tudo; híbrido: o que
-        # não é imóvel físico). A correção monetária distribuída repõe principal.
-        ipca = cfg.get("_ipca")
-        frac_credito = (1.0 if papel else
-                        1 - imoveis_pl if r.tipo == "Híbrido" and imoveis_pl is not None else None)
-        if frac_credito is not None and r.dy12 is not None and ipca is not None:
-            r.extras["dy_real"] = (1 + r.dy12) / (1 + ipca * frac_credito) - 1
-        # Papel: o FFO costuma ficar 10-25% abaixo do distribuído (caixa x competência), por
-        # isso não limita o teto; só cobertura muito baixa indica renda de reserva/ganho.
-        base_paga = min(r.dpa12 or 0, r.dpa_media or r.dpa12 or 0)
-        if papel and ffo_cota and base_paga > 0:
-            cob = ffo_cota / base_paga
-            r.extras["ffo_cobertura"] = cob
-            if cob < f.get("papel_ffo_cobertura_minima", 0):
-                r.alertas.append(
-                    f"FFO/cota ({brl(ffo_cota)}) cobre só {pct(cob, 0)} do distribuído: parte da renda "
-                    "pode vir de reserva ou ganho de capital — confira o relatório gerencial")
+                f"Renda recorrente de {brl(rec['por_cota'])}/cota em 12m (CVM) cobre só "
+                f"{pct(r.extras.get('cobertura'), 0)} do distribuído: o teto usa a recorrente — "
+                f"pelos proventos pagos seria {brl(r.teto_bruto)}")
+        elif rec.get("por_cota") is None and rec.get("motivo"):
+            r.alertas.append(f"Renda recorrente não conferida: {rec['motivo']}")
+        if (rec.get("ganhos_por_cota") or 0) > 0 and r.dpa12 and rec["ganhos_por_cota"] / r.dpa12 > 0.10:
+            r.alertas.append(f"Ganho com venda de ativos de {brl(rec['ganhos_por_cota'])}/cota em 12m: "
+                             "parte da distribuição não se repete")
         if m["anos_historico"] < f["anos_minimos_historico"]:
             r.descarte.append(f"Histórico curto ({dec(m['anos_historico'], 1)} anos)")
         if m["meses_pagos_12m"] < f["meses_minimos_com_rendimento"]:
             r.descarte.append(f"Pagou rendimento em só {m['meses_pagos_12m']} dos últimos 12 meses")
         ritmo = m.get("ritmo_recente")
         if ritmo is not None and ritmo < s["tendencia_proventos_minima"]:
-            causa = ("em papel indexado à inflação pode ser só IPCA mensal baixo — confira se é "
-                     "inflação ou inadimplência" if papel else
-                     "confira se foi saída de inquilino, venda de imóvel ou fim de renda garantida")
             r.alertas_graves.append(
-                f"Corte recente: últimos 3 rendimentos em {pct(ritmo, 0)} da média de 12m ({causa})")
+                f"Corte recente: últimos 3 rendimentos em {pct(ritmo, 0)} da média de 12m "
+                "(saída de inquilino, venda de imóvel ou fim de renda garantida?)")
 
-    if r.tipo in ("Tijolo", "Híbrido") and vac is not None and vac > f["vacancia_maxima"]:
-        r.alertas_graves.append(f"Vacância de {pct(vac)}")
+    vac = cvm.get("vacancia")
+    if vac is not None and vac > f["vacancia_maxima"]:
+        r.alertas_graves.append(f"Vacância de {pct(vac)} (ponderada pela receita, CVM)")
     if alav is not None:
-        txt = (f"Passivo de {pct(alav, 0)} do patrimônio (obrigações por aquisição de imóveis, CRIs "
-               "ou compromissadas): sofre com juros altos e pode vender ativo ou emitir abaixo do VP")
-        if alav > f.get("alavancagem_maxima", 9e9):
+        txt = (f"Dívida de {pct(alav, 0)} do ativo (securitização {mi(cvm.get('securitizacao'))} + "
+               f"compras a prazo {mi(cvm.get('obrig_aquisicao'))}): sofre com juros altos")
+        if alav > f["alavancagem_maxima"]:
             r.alertas_graves.append(txt)
-        elif alav > f.get("alavancagem_alerta", 9e9):
+        elif alav > f["alavancagem_alerta"]:
             r.alertas.append(txt)
-    if r.tipo in ("Papel", "FoF") and r.pvp and r.pvp < f["pvp_minimo_papel"]:
-        r.alertas_graves.append(
-            f"P/VP {dec(r.pvp)} em fundo de papel: mercado precifica risco de crédito nos CRIs")
-    if (r.tipo in ("Tijolo", "Híbrido") and not r.teto_bruto and ffo and r.dy12
-            and r.dy12 > ffo * s["dy_vs_ffo_alerta"]):
-        r.alertas.append(
-            f"Distribui {pct(r.dy12)} com FFO yield de {pct(ffo)}: parte da renda pode vir de "
-            "venda de imóveis (não recorrente) — confira os relatórios gerenciais")
+    v12 = cvm.get("venc_12m")
+    if v12 is not None and v12 > f["contratos_venc_12m_alerta"]:
+        r.alertas.append(f"{pct(v12, 0)} da receita com contratos vencendo em 12 meses: risco de revisão ou saída")
+    if r.pvp is not None and r.pvp > 0 and r.pvp < f["pvp_minimo_suspeito"]:
+        r.alertas.append(f"P/VP {dec(r.pvp)}: desconto extremo — confira se o laudo dos imóveis está atualizado")
     if r.dy12 and r.dy12 > s["dy_suspeito"]:
         r.alertas_graves.append(f"DY de {pct(r.dy12)}: alto demais para ser sustentável")
-    if r.tipo == "Híbrido":
-        r.alertas.append(f"Híbrido: só {pct(imoveis_pl, 0)} do PL em imóveis físicos, o resto em CRIs, "
-                         "cotas de FII ou SPEs — confira a composição no relatório gerencial"
-                         if origem == "Imóveis/PL" else
-                         "Híbrido: carteira mistura imóveis e recebíveis — confira a composição")
-    elif segmento_fundamentus in f["segmentos_genericos"] and origem == "nome/segmento":
-        r.alertas.append(f"Segmento '{segmento_fundamentus}' é genérico no Fundamentus e sem "
-                         "Imóveis/PL para confirmar o tipo: confira o portfólio")
 
     _concluir(r, cfg, fii=True)
     return r
 
 
-def avaliar_acao(linha: dict, hist: dict | None, cfg: dict,
-                 setor_id: str | None, setor_nome: str = "") -> Resultado:
-    a, s = cfg["acoes"], cfg["sinais"]
-    setores = a["setores"]
-    r = Resultado(ticker=linha.get("Papel", "?"), nome=linha.get("_nome", ""), classe="Ação",
-                  segmento=setores.get(setor_id or "", setor_nome or "?"))
-    r.tipo = r.segmento
-    r.preco, r.pvp = num(linha.get("Cotação")), num(linha.get("P/VP"))
-    r.liquidez = num(linha.get("Liq.2meses"))
-    pl, roe = num(linha.get("P/L")), num(linha.get("ROE"))
-    divida, cresc = num(linha.get("Dív.Líq/ Patrim.")), num(linha.get("Cresc. Rec.5a"))
-    det = linha.get("_det") or {}
-    ev, ev_ebitda = num(det.get("Valor da firma")), num(det.get("EV / EBITDA"))
-    div_liq = num(det.get("Dív. Líquida"))
-    div_ebitda = (div_liq / (ev / ev_ebitda)
-                  if div_liq is not None and ev and ev_ebitda and ev_ebitda > 0 else None)
-    if setor_id in a["setores_financeiros"]:
-        div_ebitda = None   # banco/seguradora: dívida é matéria-prima, não alavancagem
-    r.extras.update(pl=pl, roe=roe, divida_pl=divida, divida_ebitda=div_ebitda,
-                    cresc_receita_5a=cresc, margem_liquida=num(linha.get("Mrg. Líq.")))
+# --------------------------------------------------------------------------- ações
 
-    if setor_id not in setores:
-        r.descarte.append(f"Setor '{setor_nome or '?'}' fora do BESST (perenes)")
+def avaliar_acao(d: dict, cfg: dict) -> Resultado:
+    a, s = cfg["acoes"], cfg["sinais"]
+    k = d.get("cvm") or {}
+    r = Resultado(ticker=d["ticker"], nome=d.get("nome", ""), classe="Ação",
+                  segmento=d.get("setor") or "?", tipo=d.get("setor") or "?")
+    r.preco, r.liquidez = d.get("preco"), d.get("liquidez")
+    financeira = r.segmento in a["setores_financeiros"]
+
+    if not d.get("setor"):
+        r.descarte.append(f"Setor '{d.get('setor_b3') or '?'}' fora do BESST (perenes)")
     if (r.liquidez or 0) < a["liquidez_minima"]:
         r.descarte.append(f"Liquidez baixa ({brl(r.liquidez, 0)}/dia)")
-    if pl is None or pl <= 0:
-        r.descarte.append("Empresa com prejuízo (P/L negativo)")
+    if not r.preco:
+        r.descarte.append("Sem cotação recente na B3")
+    lucro, pl = k.get("lucro_12m"), k.get("pl")
+    if k.get("erro") or lucro is None:
+        r.descarte.append(f"Sem lucro de 12 meses na CVM ({k.get('erro') or 'demonstrações incompletas'})")
+    elif lucro <= 0:
+        r.descarte.append("Empresa com prejuízo nos últimos 12 meses (CVM)")
+    roe = lucro / pl if lucro is not None and pl and pl > 0 else None
+    ebitda = ((k.get("ebit_12m") or 0) + (k.get("da_12m") or 0)) if k.get("ebit_12m") is not None else None
+    div_liq = ((k.get("divida_bruta") or 0) - (k.get("caixa") or 0)
+               if k.get("divida_bruta") is not None and not financeira else None)
+    div_ebitda = div_liq / ebitda if div_liq is not None and ebitda and ebitda > 0 else None
+    payout = d.get("proventos_total_12m") / lucro if d.get("proventos_total_12m") and lucro and lucro > 0 else None
+    r.extras.update(roe=roe, payout=payout, divida_ebitda=div_ebitda, lucro_12m=lucro,
+                    cresc_receita_3a=k.get("cresc_receita_3a"), cvm_ref=k.get("data_ref"),
+                    jcp_frac=d.get("jcp_frac"), code_cvm=d.get("code_cvm"))
 
-    m = metricas_historicas(hist, cfg["geral"]["anos_media_proventos"]) if hist else {}
+    m = metricas_historicas(d.get("precos") or [], d.get("dividendos") or [],
+                            cfg["geral"]["anos_media_proventos"], d.get("listado_desde"))
     if not m:
-        r.descarte.append("Sem histórico de cotações/proventos")
+        r.descarte.append("Sem histórico de cotações suficiente na B3")
     else:
-        _aplicar_historico(r, m, a["yield_minimo"], cfg)
+        y = yield_minimo(a["yield_minimo"], a.get("premio_sobre_juro_real"), cfg.get("_juro_real"))
+        _aplicar_historico(r, m, y, cfg)
         exigido = min(a["anos_minimos_com_proventos"], m["janelas_anos"])
         if m["janelas_anos"] < 2:
             r.descarte.append("Histórico curto")
@@ -392,26 +311,24 @@ def avaliar_acao(linha: dict, hist: dict | None, cfg: dict,
             r.descarte.append(
                 f"Pagou proventos em só {m['anos_com_proventos']} dos últimos {m['janelas_anos']} anos")
 
+    if (d.get("jcp_frac") or 0) > 0.05:
+        r.alertas.append(f"{pct(d['jcp_frac'], 0)} dos proventos em JCP: o DY mostrado já desconta "
+                         f"{pct(cfg['geral']['ir_jcp'], 0)} de IR na fonte")
     if roe is not None and roe < a["roe_minimo"]:
         r.alertas_graves.append(f"ROE baixo ({pct(roe)})")
-    if (setor_id not in a["setores_financeiros"] and divida is not None
-            and divida > a["divida_liq_pl_maxima"]):
-        r.alertas_graves.append(f"Dívida líquida/PL alta ({dec(divida)})")
     if div_ebitda is not None:
         txt = f"Dívida líquida de {dec(div_ebitda, 1)}x o EBITDA"
-        if div_ebitda > a.get("divida_liq_ebitda_maxima", 9e9):
+        if div_ebitda > a["divida_liq_ebitda_maxima"]:
             r.alertas_graves.append(txt + ": alavancagem alta para um pagador de dividendos")
-        elif div_ebitda > a.get("divida_liq_ebitda_alerta", 9e9):
+        elif div_ebitda > a["divida_liq_ebitda_alerta"]:
             r.alertas.append(txt + ": dividendo disputa caixa com o serviço da dívida")
+    cresc = k.get("cresc_receita_3a")
     if cresc is not None and cresc < 0:
-        r.alertas.append(f"Receita encolheu nos últimos 5 anos ({pct(cresc)})")
+        r.alertas.append(f"Receita encolheu nos últimos 3 anos ({pct(cresc)} ao ano)")
     if r.dy12 and r.dy12 > s["dy_suspeito"]:
         r.alertas_graves.append(f"DY de {pct(r.dy12)}: provável provento extraordinário")
-    if r.dy12 and pl and pl > 0:
-        payout = r.dy12 * pl
-        r.extras["payout"] = payout
-        if payout > a["payout_maximo"]:
-            r.alertas_graves.append(f"Paga mais do que lucra (payout {pct(payout, 0)}): dividendo insustentável")
+    if payout is not None and payout > a["payout_maximo"]:
+        r.alertas_graves.append(f"Paga mais do que lucra (payout {pct(payout, 0)}): dividendo insustentável")
 
     _concluir(r, cfg, fii=False)
     return r
