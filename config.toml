@@ -81,7 +81,7 @@ TEPP11 = { excluir = true, motivo = "lajes corporativas (escritórios)" }
 # (+ P/VP descontado, no FII) e nenhum alerta grave. Quem só caiu junto com o mercado: OBSERVAR.
 indice_fiis  = "XFIX11"       # ETF do IFIX (cotação B3): régua para FIIs
 indice_acoes = "BOVA11"       # ETF do Ibovespa (cotação B3): régua para ações
-queda_relativa_minima = 0.10  # caiu 10+ p.p. a mais que o índice em 52 semanas
+queda_relativa_minima = 0.10  # caiu 10+ p.p. a mais que o índice em 12 meses
 queda_52s_minima   = 0.15     # usado só se o índice não estiver disponível
 expansao_dy_minima = 0.15     # DY atual 15%+ acima do DY médio histórico
 pvp_desconto       = 0.90     # FII a 0,90x o VP ou menos

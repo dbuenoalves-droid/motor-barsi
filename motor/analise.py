@@ -50,7 +50,7 @@ class Resultado:
     dy_medio: float | None = None
     expansao_dy: float | None = None
     queda52: float | None = None
-    queda_rel: float | None = None  # queda 52s menos a queda do índice (negativo = caiu mais)
+    queda_rel: float | None = None  # queda em 12 meses menos a queda do índice (negativo = caiu mais)
     cresc_dpa: float | None = None  # crescimento anual dos proventos em 3 anos
     pvp: float | None = None
     tendencia: float | None = None
@@ -353,12 +353,12 @@ def _concluir(r: Resultado, cfg: dict, fii: bool) -> None:
         r.queda_rel = r.queda52 - indice[1]
         sinal_queda = r.queda_rel <= -s["queda_relativa_minima"]
         if sinal_queda:
-            r.sinais.append(f"Cota {pct(-r.queda52, 0)} abaixo da máxima de 52s — "
+            r.sinais.append(f"Cota {pct(-r.queda52, 0)} abaixo da máxima de 12 meses — "
                             f"{dec(-r.queda_rel * 100, 0)} p.p. a mais que o {indice[0]} ({pct(indice[1], 0)})")
     elif r.queda52 is not None:
         sinal_queda = r.queda52 <= -s["queda_52s_minima"]
         if sinal_queda:
-            r.sinais.append(f"Cota {pct(-r.queda52, 0)} abaixo da máxima de 52 semanas")
+            r.sinais.append(f"Cota {pct(-r.queda52, 0)} abaixo da máxima de 12 meses")
     sinal_dy = r.expansao_dy is not None and r.expansao_dy >= s["expansao_dy_minima"]
     if sinal_dy:
         r.sinais.append(f"DY {pct(r.dy12)} contra média histórica de {pct(r.dy_medio)}")
@@ -400,7 +400,7 @@ def _leitura(r: Resultado, fii: bool) -> None:
         L.append("A cota caiu junto com a renda: o mercado pode ter razão. 3º Axioma — não "
                  "alimente esperança; só reavalie se os proventos voltarem.")
     elif r.status == OPORTUNIDADE:
-        L.append(f"Cota caiu {pct(-r.queda52, 0)} em 52 semanas, bem mais que o mercado, enquanto a "
+        L.append(f"Cota caiu {pct(-r.queda52, 0)} em 12 meses, bem mais que o mercado, enquanto a "
                  f"renda se manteve ({pct(r.tendencia, 0)} da média): queda descolada do caixa — "
                  "padrão de debandada (10º Axioma).")
     elif r.status == OBSERVAR and r.sinais:

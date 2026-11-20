@@ -290,7 +290,7 @@ def contexto_mercado(cache, cfg, cot) -> dict:
             mx = max(h for d, c, h, v in s["d"] if d > ref)
             q = s["d"][-1][1] / mx - 1
             cfg["_indices"][classe] = (nome, q)
-            ctx["indices"].append((f"{nome} 52s", q))
+            ctx["indices"].append((f"{nome} 12m", q))
     cfg["_ipca"] = ctx["ipca"][0] if ctx["ipca"] else None
     cfg["_juro_real"] = ctx.get("juro_real")
     return ctx

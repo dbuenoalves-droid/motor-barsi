@@ -98,7 +98,7 @@ def _juros(r: Resultado, cfg: dict) -> Sugestao | None:
                 + 20 * _lim(r.expansao_dy, 0.50) + 20 * _lim(r.extras.get("roe"), 0.25))
         mot = [f"{r.segmento}: receita regulada e de contratos longos — o valor sobe quando a curva de juros cai"]
     if r.queda52 is not None and r.queda52 < -0.05:
-        mot.append(f"Ainda {pct(-r.queda52, 0)} abaixo da máxima de 52 semanas")
+        mot.append(f"Ainda {pct(-r.queda52, 0)} abaixo da máxima de 12 meses")
     mot += [_teto_txt(r), _renda(r)]
     return Sugestao(r, nota, mot)
 

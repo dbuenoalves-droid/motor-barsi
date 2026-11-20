@@ -95,7 +95,7 @@ def _card(s: Sugestao, rank: int, cat: str, mapa: dict) -> str:
         _metrica("Margem", pct(r.margem, 0, True), _sinal(r.margem)),
         _metrica("DY líquido 12m", pct(r.dy12), "pos", f"{pct(_mes(r.dy12), 2)} ao mês"),
         quinta,
-        _metrica("Queda 52s", pct(r.queda52, 0), "neg" if (r.queda52 or 0) < -0.10 else ""),
+        _metrica("Queda 12m", pct(r.queda52, 0), "neg" if (r.queda52 or 0) < -0.10 else ""),
     ])
     motivos = "".join(f"<li>{_e(m)}</li>" for m in s.motivos)
     alertas = "".join(f'<div class="alerta">{_e(a)}</div>' for a in r.alertas)
@@ -252,7 +252,7 @@ def _radar(resultados: list[Resultado], mapa: dict) -> str:
             + f"<td>{listas}</td></tr>")
     cab = ["Ativo", "Classe", "Tipo", "Preço", "Teto", "Margem", "DY líquido", "Líquido/mês", "IR", "DY bruto",
            "DY médio", "P/VP", "ROE",
-           "Queda 52s", "vs índice", "Renda vs média", "Cresc. proventos", "Score", "Listas"]
+           "Queda 12m", "vs índice", "Renda vs média", "Cresc. proventos", "Score", "Listas"]
     ths = "".join(f"<th>{c}</th>" for c in cab)
     return f"""<section class="page" id="p-radar" hidden>
 <div class="hero h-neu"><div><div class="eyebrow">Radar</div><h2>Todos os ativos aprovados</h2>
@@ -295,7 +295,7 @@ prejuízo, payout insustentável, dívida ou vacância altas, corte recente ou p
 de sugestão. Fundos de papel, de fundos e híbridos nem entram na análise.</p></div>
 <div class="hero-n"><b>{len(furadas)}</b><span>barrados</span></div></div>
 <div class="panel"><div class="tw"><table><thead><tr><th>Ativo</th><th>Classe</th><th>Situação</th><th>DY líquido</th>
-<th>Queda 52s</th><th>Motivo</th></tr></thead><tbody>{''.join(linhas)}</tbody></table></div></div></section>"""
+<th>Queda 12m</th><th>Motivo</th></tr></thead><tbody>{''.join(linhas)}</tbody></table></div></div></section>"""
 
 
 CSS = """
@@ -513,7 +513,7 @@ CAMPOS_CSV = [
     ("Segmento", "segmento"), ("Tipo", "tipo"), ("Preço", "preco"), ("Teto", "teto"),
     ("Teto pelos proventos pagos", "teto_bruto"),
     ("Margem", "margem"), ("DPA 12m líquido", "dpa12"), ("DPA média", "dpa_media"), ("DY 12m líquido", "dy12"),
-    ("DY médio", "dy_medio"), ("Expansão DY", "expansao_dy"), ("Queda 52s", "queda52"),
+    ("DY médio", "dy_medio"), ("Expansão DY", "expansao_dy"), ("Queda 12m", "queda52"),
     ("Queda vs índice", "queda_rel"), ("P/VP", "pvp"), ("Renda vs média", "tendencia"),
     ("Cresc. proventos 3a", "cresc_dpa"), ("Liquidez", "liquidez"), ("Renda/mês R$1k", "renda_mil"),
     ("Score", "score"),
