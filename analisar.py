@@ -355,16 +355,21 @@ def main() -> int:
     pasta = RAIZ / cfg["geral"]["pasta_relatorios"] / agora.strftime("%Y-%m-%d_%H%M%S")
     pasta.mkdir(parents=True, exist_ok=True)
     html_path, csv_path = pasta / "relatorio.html", pasta / "dados.csv"
+    for r in resultados:   # sinal do mês (Acumular/Aguardar/Pausar/Parar) e meta de renda
+        r.extras["sinal"] = sugestoes.sinal(r, cfg)
+        r.extras["meta"] = sugestoes.atinge_meta(r, cfg)
+        r.extras["renda_sust"] = sugestoes.renda_sustentavel(r)
     sug = sugestoes.gerar(resultados, cfg)
     compra = sugestoes.ranking_compra(resultados, cfg)
+    sel = sugestoes.selecao(resultados, cfg)
     web_path = RAIZ / "web" / "painel.html"
     web_path.parent.mkdir(exist_ok=True)
     relatorio.gerar_html(resultados, sug, contexto, html_path, web_path if not pedidos else None,
-                         compra, cfg["compra"]["max_por_grupo"])
+                         compra, cfg["compra"]["max_por_grupo"], sel)
     relatorio.gerar_csv(resultados, sug, csv_path, compra[0])
     shutil.copyfile(html_path, pasta.parent / "ultimo_relatorio.html")
 
-    print(relatorio.resumo_terminal(sug, compra[0]))
+    print(relatorio.resumo_terminal(sug, compra[0], sel))
     print(f"\nRelatório: {html_path}\nPlanilha:  {csv_path}")
     if args.abrir:
         webbrowser.open(html_path.as_uri())

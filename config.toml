@@ -12,6 +12,9 @@ anos_cotacao = 2              # anos completos de cotação B3 além do ano corr
 #   dividendos = isentos; JCP = retido na fonte. Desde 01/01/2026: 17,5% (LC 224/2025).
 #   Rendimento de FII = isento. Não há tabela regressiva em proventos (ela é da renda fixa).
 ir_jcp = 0.175
+# Meta de renda: só entra nas listas quem paga pelo menos isto ao mês, LÍQUIDO de IR
+# (0.01 = 1% ao mês = 12% ao ano). Quem paga menos fica isolado no Radar com sinal AGUARDAR.
+renda_minima_mensal = 0.01
 workers = 4                   # consultas simultâneas à B3
 pasta_relatorios = "relatorios"
 pasta_cache = "cache"
@@ -57,6 +60,7 @@ anos_minimos_historico = 2
 # Renda recorrente = resultado de caixa dos últimos 4 trimestres (CVM) menos ganhos com venda
 # de imóveis e títulos. Se cobrir menos que isto dos proventos pagos, o teto passa a usar ela.
 cobertura_recorrente_minima = 0.90
+cobertura_pausar = 0.80              # abaixo disto o sinal vira PAUSAR (o rendimento tende a cair)
 # Dívida = securitização + compras de imóveis a prazo, sobre o ativo total (informe mensal CVM).
 alavancagem_alerta = 0.20            # acima: alerta e perde nota nas listas
 alavancagem_maxima = 0.40            # acima: alerta grave (fora das listas)
@@ -102,6 +106,13 @@ longo_roe_minimo = 0.12
 longo_cresc_proventos_minimo = 0.0
 longo_pvp_maximo_fii = 1.0
 longo_vacancia_maxima = 0.10
+
+# -----------------------------------------------------------------------------
+[selecao]
+# Filtro dos filtros: sinal ACUMULAR (limpo, abaixo do teto, renda conferida, ≥ meta mensal)
+# + cota em queda + bom pagador (critérios do ranking de compra). Carteira enxuta: até N nomes.
+queda_minima = 0.10           # cota pelo menos 10% abaixo da máxima de 12 meses
+maximo = 6
 
 # -----------------------------------------------------------------------------
 [compra]

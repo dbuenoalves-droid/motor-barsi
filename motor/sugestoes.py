@@ -20,6 +20,10 @@ class Sugestao:
 
 
 CATEGORIAS = {
+    "selecao": ("Seleção", "Filtro dos filtros",
+                "Pagam 1% ao mês ou mais LÍQUIDO, estão com a cota em queda, são bons pagadores (proventos "
+                "todo ano, renda conferida) e passaram em todos os filtros. Acumule um por vez até a quantidade "
+                "de cotas que você definiu; se o sinal dele virar Pausar ou Parar, passe para o próximo da lista."),
     "compra": ("Ranking de compra", "Só compra · foco em dividendos",
                "Os melhores pontos de entrada para acumular e viver de proventos: renda recorrente "
                "alta, paga todo ano sem falha, negócio estável, a preço abaixo do teto. "
@@ -39,6 +43,68 @@ CATEGORIAS = {
 def limpo(r: Resultado) -> bool:
     return (r.status not in (DESCARTADO, ESTRUTURAL) and not r.alertas_graves
             and r.margem is not None and r.margem >= 0)
+
+
+def renda_sustentavel(r: Resultado) -> float | None:
+    """DY líquido anual que se repete: o pago em 12m, ou a renda recorrente da CVM se for menor (FII)."""
+    if r.dy12 is None:
+        return None
+    rec = r.extras.get("recorrente")
+    if r.classe == "FII" and rec is not None and r.preco:
+        return min(r.dy12, max(rec, 0) / r.preco)
+    return r.dy12
+
+
+def atinge_meta(r: Resultado, cfg: dict) -> bool:
+    """Renda líquida (já sem IR) e sustentável de pelo menos `renda_minima_mensal` ao mês."""
+    meta = cfg["geral"].get("renda_minima_mensal") or 0
+    rs = renda_sustentavel(r)
+    return rs is not None and rs / 12 >= meta
+
+
+ACUMULAR, AGUARDAR, PAUSAR, PARAR = "ACUMULAR", "AGUARDAR", "PAUSAR", "PARAR"
+
+
+def sinal(r: Resultado, cfg: dict) -> tuple[str, str]:
+    """Resposta à pergunta do mês: continuo acumulando cotas deste ativo?"""
+    meta = cfg["geral"].get("renda_minima_mensal") or 0
+    if r.status == DESCARTADO:
+        return PARAR, (r.descarte[0] if r.descarte else "reprovado nos filtros")
+    if r.status == ESTRUTURAL:
+        return PARAR, "renda caindo junto com a cota"
+    if r.alertas_graves:
+        return PAUSAR, r.alertas_graves[0]
+    if r.classe == "FII":
+        cob = r.extras.get("cobertura")
+        if cob is None:
+            return PAUSAR, "renda recorrente não conferida pela CVM — confira o relatório gerencial"
+        if cob < cfg["fiis"]["cobertura_pausar"]:
+            return PAUSAR, f"renda recorrente cobre só {pct(cob, 0)} do que distribui: o rendimento tende a cair"
+    if r.margem is None or r.margem < 0:
+        return AGUARDAR, f"preço acima do teto Barsi ({brl(r.teto)})"
+    rs = renda_sustentavel(r) or 0
+    base = "" if abs(rs - (r.dy12 or 0)) < 1e-9 else " (pela renda recorrente)"
+    if not atinge_meta(r, cfg):
+        return AGUARDAR, f"rende {pct(rs / 12, 2)} ao mês líquido{base}, abaixo da meta de {pct(meta, 1)}"
+    return ACUMULAR, f"limpo, abaixo do teto e rendendo {pct(rs / 12, 2)} ao mês líquido{base}"
+
+
+def selecao(resultados: list[Resultado], cfg: dict) -> list[Sugestao]:
+    """Filtro dos filtros: sinal ACUMULAR + cota em queda + bom pagador (passa no ranking de compra)."""
+    sel = cfg["selecao"]
+    out = []
+    for r in resultados:
+        if sinal(r, cfg)[0] != ACUMULAR or r.queda52 is None or r.queda52 > -sel["queda_minima"]:
+            continue
+        s = _nota_compra(r, cfg)
+        if s is None:
+            continue
+        s.nota = round(max(0.0, min(100.0, s.nota)), 0)
+        s.motivos.insert(0, f"Cota {pct(-r.queda52, 0)} abaixo da máxima de 12 meses, rendendo "
+                            f"{pct((renda_sustentavel(r) or 0) / 12, 2)} ao mês líquido e sustentável")
+        out.append(s)
+    out.sort(key=lambda s: -s.nota)
+    return out[:sel["maximo"]]
 
 
 def _renda(r: Resultado) -> str:
@@ -151,7 +217,7 @@ def gerar(resultados: list[Resultado], cfg: dict) -> dict[str, list[Sugestao]]:
     top = cfg["sugestoes"]["top"]
     saida = {}
     for chave, f in _FUNCOES.items():
-        itens = [s for s in (f(r, cfg) for r in resultados) if s]
+        itens = [s for s in (f(r, cfg) for r in resultados if atinge_meta(r, cfg)) if s]
         for s in itens:
             pen = _penalidade_balanco(s.r, cfg)
             if pen >= 1:
@@ -249,7 +315,7 @@ def _nota_compra(r: Resultado, cfg: dict) -> Sugestao | None:
 def ranking_compra(resultados: list[Resultado], cfg: dict) -> tuple[list[Sugestao], list[Sugestao]]:
     """(ranking, barrados pela concentração). Limite de N ativos por grupo (setor/segmento)."""
     c = cfg["compra"]
-    itens = [s for s in (_nota_compra(r, cfg) for r in resultados) if s]
+    itens = [s for s in (_nota_compra(r, cfg) for r in resultados if atinge_meta(r, cfg)) if s]
     for s in itens:
         s.nota = round(max(0.0, min(100.0, s.nota)), 0)
     itens.sort(key=lambda s: -s.nota)
